@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Casas de Pan · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+let miembrosCache = [];
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Casas de Pan');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  document.getElementById('pageContent').innerHTML = `
+    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 flex items-start gap-3">
+      <div class="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center flex-shrink-0">
+        <i data-lucide="croissant" class="w-5 h-5"></i>
+      </div>
+      <p class="text-sm text-amber-900">Grupos pequeños que se reúnen en hogares. Un miembro puede pertenecer a varias.</p>
+    </div>
+    <div class="flex gap-3 mb-5">
+      <button onclick="nueva()" data-roles="pastor,lider,servidor" class="px-5 py-3 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-semibold rounded-xl flex items-center gap-2">
+        <i data-lucide="plus" class="w-5 h-5"></i>Nueva Casa de Pan
+      </button>
+    </div>
+    <div id="grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  `;
+  const { data } = await supabase.from('members').select('id, nombre').order('nombre');
+  miembrosCache = data || [];
+  UI.refreshIcons();
+  await cargar();
+})();
+
+async function cargar() {
+  const { data: houses } = await supabase.from('houses')
+    .select('*, members!houses_anfitrion_id_fkey(nombre)').order('nombre');
+  const { data: rels } = await supabase.from('member_houses').select('house_id, members(id, nombre)');
+
+  const grid = document.getElementById('grid');
+  if (!houses || houses.length === 0) {
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">
+      <i data-lucide="croissant" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+      <p>Sin Casas de Pan registradas.</p>
+    </div>`;
+    UI.refreshIcons();
+    return;
+  }
+
+  grid.innerHTML = houses.map(h => {
+    const integrantes = (rels||[]).filter(r => r.house_id === h.id);
+    return `
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition">
+        <div class="flex items-start justify-between mb-3">
+          <div class="flex items-center gap-2 flex-1 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+              <i data-lucide="croissant" class="w-5 h-5"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <h4 class="font-bold text-slate-800 truncate">${h.nombre}</h4>
+              ${h.anfitrion_id ? `<p class="text-xs text-slate-500 truncate">Anfitrión: ${h.members?.nombre||'—'}</p>` : '<p class="text-xs text-slate-400">Sin anfitrión</p>'}
+            </div>
+          </div>
+          <div class="flex gap-1 flex-shrink-0">
+            <button onclick='editarPorId("${h.id}")' data-roles="pastor,lider,servidor" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600">
+              <i data-lucide="pencil" class="w-4 h-4"></i>
+            </button>
+            <button onclick="eliminar('${h.id}','${h.nombre.replace(/'/g,"\\'")}')" data-roles="pastor" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+        <div class="text-sm text-slate-600 space-y-1 mb-3">
+          ${h.dia_reunion ? `<div class="flex items-center gap-1.5"><i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i><span class="capitalize">${h.dia_reunion}</span>${h.hora ? ' · '+h.hora : ''}</div>` : ''}
+          ${h.direccion ? `<div class="flex items-center gap-1.5"><i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400"></i>${h.direccion}</div>` : ''}
+          ${h.descripcion ? `<div class="italic text-slate-500 text-xs">${h.descripcion}</div>` : ''}
+        </div>
+        <div class="border-t border-slate-100 pt-3">
+          <div class="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5">
+            <i data-lucide="users" class="w-3.5 h-3.5"></i>${integrantes.length} integrante${integrantes.length!==1?'s':''}
+          </div>
+          <div class="flex flex-wrap gap-1">
+            ${integrantes.slice(0,8).map(r => `<span class="text-xs bg-amber-50 text-amber-800 px-2 py-0.5 rounded-md">${r.members?.nombre||'?'}</span>`).join('')}
+            ${integrantes.length>8 ? `<span class="text-xs text-slate-400">+${integrantes.length-8}</span>` : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+async function editarPorId(id) {
+  const { data } = await supabase.from('houses').select('*').eq('id', id).single();
+  nueva(data);
+}
+
+function nueva(h) {
+  h = h || {};
+  const miembrosOpts = miembrosCache.map(m =>
+    `<option value="${m.id}" ${h.anfitrion_id===m.id?'selected':''}>${m.nombre}</option>`).join('');
+  const dias = ['lunes','martes','miercoles','jueves','viernes','sabado','domingo'];
+  const diasOpts = dias.map(d => `<option value="${d}" ${h.dia_reunion===d?'selected':''}>${d}</option>`).join('');
+
+  UI.openModal('mh', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${h.id?'Editar':'Nueva'} Casa de Pan</h3>
+      <button onclick="UI.closeModal('mh')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="hForm" class="p-4 space-y-3">
+      <input type="hidden" name="id" value="${h.id||''}">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Nombre *</label>
+        <input name="nombre" required value="${h.nombre||''}" placeholder="Ej: Casa López Norte" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Anfitrión</label>
+        <select name="anfitrion_id" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="">Sin anfitrión</option>${miembrosOpts}
+        </select>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Dirección</label>
+        <input name="direccion" value="${h.direccion||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Día</label>
+          <select name="dia_reunion" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+            <option value="">—</option>${diasOpts}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Hora</label>
+          <input name="hora" type="time" value="${h.hora||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Descripción</label>
+        <textarea name="descripcion" rows="2" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">${h.descripcion||''}</textarea>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('mh')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+
+  document.getElementById('hForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      nombre: fd.get('nombre'),
+      anfitrion_id: fd.get('anfitrion_id') || null,
+      direccion: fd.get('direccion') || null,
+      dia_reunion: fd.get('dia_reunion') || null,
+      hora: fd.get('hora') || null,
+      descripcion: fd.get('descripcion') || null
+    };
+    const { error } = id
+      ? await supabase.from('houses').update(payload).eq('id', id)
+      : await supabase.from('houses').insert(payload);
+    if (error) UI.toast(error.message, 'error');
+    else { UI.toast('Guardado','success'); UI.closeModal('mh'); cargar(); }
+  };
+}
+
+async function eliminar(id, nombre) {
+  if (!confirm(`¿Eliminar "${nombre}"?`)) return;
+  const { error } = await supabase.from('houses').delete().eq('id', id);
+  if (error) UI.toast(error.message, 'error');
+  else { UI.toast('Eliminada','success'); cargar(); }
+}
+
+window.nueva = nueva;
+window.editarPorId = editarPorId;
+window.eliminar = eliminar;
+</script>
+</body>
+</html>

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Redes Sociales · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+let miembrosCache = [];
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Redes Sociales');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  document.getElementById('pageContent').innerHTML = `
+    <div class="flex flex-col sm:flex-row gap-3 mb-5">
+      <select id="filtroEstado" class="px-3 py-2.5 border border-slate-300 rounded-lg bg-white">
+        <option value="">Todos los estados</option>
+        <option value="pendiente">Pendiente</option>
+        <option value="en_diseno">En diseño</option>
+        <option value="aprobado">Aprobado</option>
+        <option value="publicado">Publicado</option>
+      </select>
+      <button onclick="nuevo()" data-roles="pastor,lider,servidor" class="sm:ml-auto px-5 py-2.5 bg-pink-600 hover:bg-pink-700 active:scale-95 text-white font-semibold rounded-xl flex items-center justify-center gap-2">
+        <i data-lucide="plus" class="w-5 h-5"></i>Nuevo contenido
+      </button>
+    </div>
+    <div id="grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  `;
+  const { data } = await supabase.from('members').select('id, nombre').order('nombre');
+  miembrosCache = data || [];
+  UI.refreshIcons();
+  document.getElementById('filtroEstado').onchange = cargar;
+  await cargar();
+})();
+
+const iconoPlataforma = {
+  instagram: 'instagram',
+  facebook: 'facebook',
+  tiktok: 'music-2',
+  whatsapp: 'message-circle'
+};
+
+async function cargar() {
+  const estado = document.getElementById('filtroEstado').value;
+  let q = supabase.from('social_posts').select('*, members(nombre)').order('fecha_programada',{ascending:true, nullsFirst:false});
+  if (estado) q = q.eq('estado', estado);
+  const { data } = await q;
+
+  const colors = {
+    pendiente:'bg-slate-100 text-slate-700',
+    en_diseno:'bg-amber-100 text-amber-700',
+    aprobado:'bg-blue-100 text-blue-700',
+    publicado:'bg-emerald-100 text-emerald-700'
+  };
+
+  const grid = document.getElementById('grid');
+  if (!data || data.length === 0) {
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">
+      <i data-lucide="share-2" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+      <p>Sin contenido planificado.</p>
+    </div>`;
+    UI.refreshIcons(); return;
+  }
+  grid.innerHTML = data.map(p => `
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden hover:shadow-md transition">
+      ${p.imagen_url ? `<img src="${p.imagen_url}" class="w-full h-40 object-cover">` : ''}
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div class="w-9 h-9 rounded-lg bg-pink-100 text-pink-700 flex items-center justify-center">
+            <i data-lucide="${iconoPlataforma[p.plataforma]||'share-2'}" class="w-4 h-4"></i>
+          </div>
+          <span class="px-2 py-0.5 rounded-full text-xs font-semibold ${colors[p.estado]}">${p.estado.replace('_',' ')}</span>
+        </div>
+        <h4 class="font-bold text-slate-800 mb-1">${p.titulo}</h4>
+        <p class="text-sm text-slate-600 mb-3 line-clamp-3">${p.descripcion||''}</p>
+        <div class="text-xs text-slate-500 space-y-1">
+          ${p.fecha_programada ? `<div class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i>${UI.fecha(p.fecha_programada)}</div>`:''}
+          ${p.members ? `<div class="flex items-center gap-1"><i data-lucide="user" class="w-3 h-3"></i>${p.members.nombre}</div>`:''}
+        </div>
+        <div class="flex gap-1 mt-3">
+          <button onclick='editar(${JSON.stringify(p).replace(/'/g,"&#39;")})' data-roles="pastor,lider,servidor" class="flex-1 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center justify-center gap-1">
+            <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+          </button>
+          <button onclick="cambiarEstado('${p.id}')" class="flex-1 py-2 text-sm bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-lg font-medium flex items-center justify-center gap-1">
+            <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>Avanzar
+          </button>
+          <button onclick="eliminar('${p.id}')" data-roles="pastor,lider" class="py-2 px-3 text-sm bg-red-100 hover:bg-red-200 text-red-700 rounded-lg flex items-center justify-center">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+function nuevo(p) {
+  p = p || {};
+  const opts = miembrosCache.map(m => `<option value="${m.id}" ${p.responsable_id===m.id?'selected':''}>${m.nombre}</option>`).join('');
+  UI.openModal('ms', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${p.id?'Editar':'Nuevo'} contenido</h3>
+      <button onclick="UI.closeModal('ms')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="sForm" class="p-4 space-y-3">
+      <input type="hidden" name="id" value="${p.id||''}">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Título *</label>
+        <input name="titulo" required value="${p.titulo||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Descripción / copy</label>
+        <textarea name="descripcion" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg" rows="3">${p.descripcion||''}</textarea>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Plataforma</label>
+          <select name="plataforma" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+            ${['instagram','facebook','tiktok','whatsapp'].map(x => `<option value="${x}" ${p.plataforma===x?'selected':''}>${x}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Estado</label>
+          <select name="estado" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+            ${['pendiente','en_diseno','aprobado','publicado'].map(x => `<option value="${x}" ${p.estado===x?'selected':''}>${x.replace('_',' ')}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Fecha programada</label>
+        <input name="fecha_programada" type="date" value="${p.fecha_programada||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Responsable</label>
+        <select name="responsable_id" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="">Sin responsable</option>${opts}
+        </select>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">URL de imagen</label>
+        <input name="imagen_url" placeholder="https://..." value="${p.imagen_url||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('ms')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-pink-600 hover:bg-pink-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('sForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      titulo: fd.get('titulo'),
+      descripcion: fd.get('descripcion') || null,
+      plataforma: fd.get('plataforma'),
+      estado: fd.get('estado'),
+      fecha_programada: fd.get('fecha_programada') || null,
+      responsable_id: fd.get('responsable_id') || null,
+      imagen_url: fd.get('imagen_url') || null
+    };
+    const { error } = id
+      ? await supabase.from('social_posts').update(payload).eq('id',id)
+      : await supabase.from('social_posts').insert(payload);
+    if (error) UI.toast(error.message,'error');
+    else { UI.toast('Guardado','success'); UI.closeModal('ms'); cargar(); }
+  };
+}
+
+function editar(p) { nuevo(p); }
+
+async function cambiarEstado(id) {
+  const orden = ['pendiente','en_diseno','aprobado','publicado'];
+  const { data } = await supabase.from('social_posts').select('estado').eq('id',id).single();
+  const idx = orden.indexOf(data.estado);
+  const siguiente = orden[(idx+1)%orden.length];
+  const { error } = await supabase.from('social_posts').update({ estado: siguiente }).eq('id',id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Estado: '+siguiente,'success'); cargar(); }
+}
+
+async function eliminar(id) {
+  if (!confirm('¿Eliminar?')) return;
+  const { error } = await supabase.from('social_posts').delete().eq('id',id);
+  if (error) UI.toast(error.message,'error');
+  else cargar();
+}
+
+window.nuevo = nuevo;
+window.editar = editar;
+window.cambiarEstado = cambiarEstado;
+window.eliminar = eliminar;
+</script>
+</body>
+</html>

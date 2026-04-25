@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Membresía · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+const ESTADOS = ['nuevo','discipulado','bautizado','lider','inactivo'];
+let cacheFamilias = [];
+let cacheTeams = [];
+let cacheHouses = [];
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Membresía');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  document.getElementById('pageContent').innerHTML = `
+    <!-- Barra búsqueda + filtros (sticky para móvil) -->
+    <div class="sticky top-[57px] lg:top-[65px] z-10 bg-slate-50 -mx-4 lg:mx-0 px-4 lg:px-0 pb-3 pt-1">
+      <div class="flex flex-col sm:flex-row gap-2">
+        <div class="relative flex-1">
+          <i data-lucide="search" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input id="buscar" placeholder="Buscar nombre o teléfono..." class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+        <div class="flex gap-2">
+          <select id="filtroEstado" class="flex-1 sm:flex-none px-3 py-3 rounded-xl border border-slate-300 bg-white">
+            <option value="">Todos</option>
+            ${ESTADOS.map(e => `<option value="${e}">${e}</option>`).join('')}
+          </select>
+          <button onclick="abrirForm()" data-roles="pastor,lider,servidor" class="px-4 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold rounded-xl flex items-center gap-2 whitespace-nowrap">
+            <i data-lucide="plus" class="w-5 h-5"></i>
+            <span class="hidden sm:inline">Nuevo</span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="lista" class="grid gap-3 mt-3"></div>
+  `;
+
+  const [fams, tms, hs] = await Promise.all([
+    supabase.from('families').select('*').order('nombre_familia'),
+    supabase.from('teams').select('*').order('nombre'),
+    supabase.from('houses').select('*').order('nombre')
+  ]);
+  cacheFamilias = fams.data || [];
+  cacheTeams = tms.data || [];
+  cacheHouses = hs.data || [];
+
+  UI.refreshIcons();
+  await cargar();
+  document.getElementById('buscar').oninput = cargar;
+  document.getElementById('filtroEstado').onchange = cargar;
+})();
+
+async function cargar() {
+  const q = document.getElementById('buscar').value.trim().toLowerCase();
+  const estado = document.getElementById('filtroEstado').value;
+
+  let query = supabase.from('members')
+    .select(`*, families(nombre_familia), member_teams(teams(id, nombre)), member_houses(houses(id, nombre))`)
+    .order('nombre');
+  if (estado) query = query.eq('estado_espiritual', estado);
+  const { data, error } = await query;
+
+  const lista = document.getElementById('lista');
+  if (error) { lista.innerHTML = `<p class="text-red-600 p-4 bg-red-50 rounded-xl">${error.message}</p>`; return; }
+
+  let filtered = data || [];
+  if (q) filtered = filtered.filter(m =>
+    (m.nombre||'').toLowerCase().includes(q) || (m.telefono||'').toLowerCase().includes(q)
+  );
+  if (filtered.length === 0) {
+    lista.innerHTML = `
+      <div class="text-center py-12 text-slate-400">
+        <i data-lucide="users" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+        <p>Sin resultados.</p>
+      </div>`;
+    UI.refreshIcons();
+    return;
+  }
+
+  const colorEstado = {
+    nuevo:'bg-blue-100 text-blue-700',
+    discipulado:'bg-violet-100 text-violet-700',
+    bautizado:'bg-emerald-100 text-emerald-700',
+    lider:'bg-amber-100 text-amber-700',
+    inactivo:'bg-slate-200 text-slate-600'
+  };
+
+  lista.innerHTML = filtered.map(m => {
+    const ministerios = (m.member_teams||[]).map(mt => mt.teams?.nombre).filter(Boolean);
+    const casas = (m.member_houses||[]).map(mh => mh.houses?.nombre).filter(Boolean);
+    return `
+      <div class="bg-white rounded-2xl border border-slate-200 p-3 sm:p-4 flex items-center gap-3 hover:shadow-md transition">
+        <div class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-lg overflow-hidden flex-shrink-0">
+          ${m.foto_url ? `<img src="${m.foto_url}" class="w-full h-full object-cover">` : (m.nombre[0]||'?').toUpperCase()}
+        </div>
+        <div class="flex-1 min-w-0" onclick="verPerfil('${m.id}')">
+          <div class="font-semibold text-slate-800 truncate">${m.nombre}</div>
+          <div class="text-xs sm:text-sm text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+            ${m.telefono ? `<span class="flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i>${m.telefono}</span>` : ''}
+            ${m.families ? `<span class="flex items-center gap-1"><i data-lucide="home" class="w-3 h-3"></i>${m.families.nombre_familia}</span>` : ''}
+          </div>
+          ${ministerios.length || casas.length ? `
+            <div class="text-xs text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+              ${ministerios.length ? `<span class="flex items-center gap-1"><i data-lucide="target" class="w-3 h-3"></i>${ministerios.slice(0,2).join(', ')}${ministerios.length>2?` +${ministerios.length-2}`:''}</span>` : ''}
+              ${casas.length ? `<span class="flex items-center gap-1"><i data-lucide="croissant" class="w-3 h-3"></i>${casas.slice(0,2).join(', ')}${casas.length>2?` +${casas.length-2}`:''}</span>` : ''}
+            </div>` : ''}
+          <span class="inline-block mt-1 px-2 py-0.5 text-[10px] font-semibold rounded-full ${colorEstado[m.estado_espiritual]||''}">${m.estado_espiritual}</span>
+        </div>
+        <div class="flex flex-col gap-1 flex-shrink-0">
+          <button onclick='editarPorId("${m.id}")' data-roles="pastor,lider,servidor" class="p-2 hover:bg-slate-100 rounded-lg text-slate-600" title="Editar">
+            <i data-lucide="pencil" class="w-4 h-4"></i>
+          </button>
+          <button onclick="eliminar('${m.id}','${(m.nombre||'').replace(/'/g,"\\'")}')" data-roles="pastor" class="p-2 hover:bg-red-100 rounded-lg text-red-600" title="Eliminar">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+}
+
+async function editarPorId(id) {
+  const { data } = await supabase.from('members')
+    .select(`*, member_teams(team_id), member_houses(house_id)`)
+    .eq('id', id).single();
+  abrirForm(data);
+}
+
+function abrirForm(m) {
+  m = m || {};
+  const teamsActuales = (m.member_teams || []).map(mt => mt.team_id);
+  const casasActuales = (m.member_houses || []).map(mh => mh.house_id);
+
+  const familiasOpts = cacheFamilias.map(f =>
+    `<option value="${f.id}" ${m.familia_id===f.id?'selected':''}>${f.nombre_familia}</option>`).join('');
+  const estadoOpts = ESTADOS.map(e =>
+    `<option value="${e}" ${m.estado_espiritual===e?'selected':''}>${e}</option>`).join('');
+
+  const teamsCheckboxes = cacheTeams.map(t => `
+    <label class="flex items-center gap-2 p-2.5 bg-slate-50 hover:bg-indigo-50 rounded-lg cursor-pointer border border-transparent has-[:checked]:bg-indigo-50 has-[:checked]:border-indigo-300">
+      <input type="checkbox" name="teams" value="${t.id}" ${teamsActuales.includes(t.id)?'checked':''} class="accent-indigo-600 w-4 h-4">
+      <span class="text-sm">${t.nombre}</span>
+    </label>`).join('') || '<p class="text-xs text-slate-400 p-2">Sin ministerios.</p>';
+
+  const casasCheckboxes = cacheHouses.map(h => `
+    <label class="flex items-center gap-2 p-2.5 bg-slate-50 hover:bg-amber-50 rounded-lg cursor-pointer border border-transparent has-[:checked]:bg-amber-50 has-[:checked]:border-amber-300">
+      <input type="checkbox" name="houses" value="${h.id}" ${casasActuales.includes(h.id)?'checked':''} class="accent-amber-600 w-4 h-4">
+      <span class="text-sm">${h.nombre}</span>
+    </label>`).join('') || '<p class="text-xs text-slate-400 p-2">Sin casas.</p>';
+
+  UI.openModal('modalMember', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${m.id?'Editar miembro':'Nuevo miembro'}</h3>
+      <button type="button" onclick="UI.closeModal('modalMember')" class="p-2 hover:bg-slate-100 rounded-lg">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <form id="memberForm" class="p-4 space-y-4">
+      <input name="id" type="hidden" value="${m.id||''}">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Nombre completo *</label>
+        <input name="nombre" required value="${m.nombre||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Teléfono</label>
+          <input name="telefono" value="${m.telefono||''}" inputmode="tel" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Fecha nacimiento</label>
+          <input name="fecha_nacimiento" type="date" value="${m.fecha_nacimiento||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Dirección</label>
+        <input name="direccion" value="${m.direccion||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Familia</label>
+          <select name="familia_id" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+            <option value="">Sin asignar</option>${familiasOpts}
+          </select>
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Estado espiritual</label>
+          <select name="estado_espiritual" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">${estadoOpts}</select>
+        </div>
+      </div>
+
+      <div>
+        <label class="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+          <i data-lucide="target" class="w-4 h-4"></i>Ministerios
+          <span class="text-slate-400 text-xs font-normal">(puede pertenecer a varios)</span>
+        </label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-1 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-1.5">
+          ${teamsCheckboxes}
+        </div>
+      </div>
+
+      <div>
+        <label class="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+          <i data-lucide="croissant" class="w-4 h-4"></i>Casas de Pan
+          <span class="text-slate-400 text-xs font-normal">(varias posibles)</span>
+        </label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mt-1 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-1.5">
+          ${casasCheckboxes}
+        </div>
+      </div>
+
+      <div>
+        <label class="text-sm font-medium text-slate-700">Foto (máx 2MB)</label>
+        <input name="foto" type="file" accept="image/*" class="w-full mt-1 text-sm file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700">
+        ${m.foto_url ? `<div class="mt-2"><img src="${m.foto_url}" class="w-16 h-16 rounded-full object-cover"></div>` : ''}
+      </div>
+
+      <div>
+        <label class="text-sm font-medium text-slate-700">Notas</label>
+        <textarea name="notas" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg" rows="2">${m.notas||''}</textarea>
+      </div>
+
+      <div class="flex gap-2 pt-2 sticky bottom-0 bg-white pb-safe">
+        <button type="button" onclick="UI.closeModal('modalMember')" class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" id="btnGuardar" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+
+  document.getElementById('memberForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('btnGuardar');
+    btn.disabled = true; btn.innerHTML = '<span>Guardando...</span>';
+
+    const form = e.target;
+    const fd = new FormData(form);
+    const id = fd.get('id');
+    const payload = {
+      nombre: fd.get('nombre'),
+      telefono: fd.get('telefono') || null,
+      direccion: fd.get('direccion') || null,
+      familia_id: fd.get('familia_id') || null,
+      estado_espiritual: fd.get('estado_espiritual'),
+      fecha_nacimiento: fd.get('fecha_nacimiento') || null,
+      notas: fd.get('notas') || null
+    };
+
+    const foto = fd.get('foto');
+    if (foto && foto.size > 0) {
+      if (foto.size > 2 * 1024 * 1024) {
+        UI.toast('La foto supera 2MB', 'warning');
+        btn.disabled = false; btn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i>Guardar'; UI.refreshIcons();
+        return;
+      }
+      const ext = (foto.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5) || 'jpg';
+      const path = `members/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('member-photos')
+        .upload(path, foto, { cacheControl: '3600', upsert: false, contentType: foto.type });
+      if (upErr) UI.toast('Foto no subida: ' + upErr.message, 'warning');
+      else {
+        const { data: pub } = supabase.storage.from('member-photos').getPublicUrl(path);
+        payload.foto_url = pub.publicUrl;
+      }
+    }
+
+    let memberId = id;
+    let result;
+    if (id) result = await supabase.from('members').update(payload).eq('id', id);
+    else {
+      result = await supabase.from('members').insert(payload).select().single();
+      if (!result.error) memberId = result.data.id;
+    }
+    if (result.error) {
+      UI.toast('Error: ' + result.error.message, 'error');
+      btn.disabled = false; btn.innerHTML = '<i data-lucide="save" class="w-4 h-4"></i>Guardar'; UI.refreshIcons();
+      return;
+    }
+
+    const teamsSel = Array.from(form.querySelectorAll('input[name="teams"]:checked')).map(c => c.value);
+    const casasSel = Array.from(form.querySelectorAll('input[name="houses"]:checked')).map(c => c.value);
+
+    await supabase.from('member_teams').delete().eq('member_id', memberId);
+    if (teamsSel.length) await supabase.from('member_teams').insert(teamsSel.map(tid => ({ member_id: memberId, team_id: tid })));
+    await supabase.from('member_houses').delete().eq('member_id', memberId);
+    if (casasSel.length) await supabase.from('member_houses').insert(casasSel.map(hid => ({ member_id: memberId, house_id: hid })));
+
+    UI.toast('Guardado correctamente', 'success');
+    UI.closeModal('modalMember');
+    cargar();
+  };
+}
+
+async function eliminar(id, nombre) {
+  if (!confirm(`¿Eliminar a ${nombre}?`)) return;
+  const { error } = await supabase.from('members').delete().eq('id', id);
+  if (error) UI.toast('Error: ' + error.message, 'error');
+  else { UI.toast('Eliminado', 'success'); cargar(); }
+}
+
+async function verPerfil(id) {
+  const { data: m } = await supabase.from('members')
+    .select(`*, families(nombre_familia), member_teams(teams(nombre)), member_houses(houses(nombre))`)
+    .eq('id', id).single();
+  const { data: att } = await supabase.from('attendance').select('*').eq('member_id', id).order('fecha', { ascending: false }).limit(10);
+
+  const ministerios = (m.member_teams||[]).map(mt => mt.teams?.nombre).filter(Boolean);
+  const casas = (m.member_houses||[]).map(mh => mh.houses?.nombre).filter(Boolean);
+
+  const asistencias = att && att.length ? att.map(a =>
+    `<div class="flex justify-between text-sm py-2 border-b border-slate-100 last:border-0">
+      <span>${UI.fecha(a.fecha)} · ${a.tipo_reunion}</span>
+      <span>${a.asistio ? '<i data-lucide="check" class="w-4 h-4 text-emerald-600 inline"></i>' : '<i data-lucide="x" class="w-4 h-4 text-red-600 inline"></i>'}</span>
+    </div>`).join('') : '<p class="text-slate-400 text-sm">Sin registros</p>';
+
+  UI.openModal('modalPerfil', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">Perfil</h3>
+      <button type="button" onclick="UI.closeModal('modalPerfil')" class="p-2 hover:bg-slate-100 rounded-lg">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+    <div class="p-4">
+      <div class="flex items-center gap-4 mb-4">
+        <div class="w-20 h-20 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-2xl font-bold overflow-hidden">
+          ${m.foto_url ? `<img src="${m.foto_url}" class="w-full h-full object-cover">` : m.nombre[0].toUpperCase()}
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-xl font-bold truncate">${m.nombre}</h3>
+          <p class="text-slate-500 text-sm capitalize">${m.estado_espiritual}</p>
+          ${m.telefono ? `<p class="text-sm flex items-center gap-1 mt-1"><i data-lucide="phone" class="w-3.5 h-3.5"></i>${m.telefono}</p>` : ''}
+        </div>
+      </div>
+      <div class="space-y-2 text-sm bg-slate-50 rounded-xl p-3">
+        ${m.direccion ? `<div><b>Dirección:</b> ${m.direccion}</div>` : ''}
+        ${m.families ? `<div><b>Familia:</b> ${m.families.nombre_familia}</div>` : ''}
+        ${ministerios.length ? `<div><b>Ministerios:</b> ${ministerios.join(', ')}</div>` : ''}
+        ${casas.length ? `<div><b>Casas de Pan:</b> ${casas.join(', ')}</div>` : ''}
+        ${m.notas ? `<div><b>Notas:</b> ${m.notas}</div>` : ''}
+      </div>
+      <div class="mt-4">
+        <h4 class="font-semibold mb-2 flex items-center gap-1.5"><i data-lucide="check-square" class="w-4 h-4"></i>Últimas asistencias</h4>
+        <div class="bg-white border border-slate-200 rounded-xl p-3">${asistencias}</div>
+      </div>
+      <button onclick="UI.closeModal('modalPerfil')" class="mt-4 w-full py-3 bg-slate-100 hover:bg-slate-200 rounded-xl font-medium">Cerrar</button>
+    </div>
+  `);
+}
+
+window.abrirForm = abrirForm;
+window.editarPorId = editarPorId;
+window.eliminar = eliminar;
+window.verPerfil = verPerfil;
+</script>
+</body>
+</html>

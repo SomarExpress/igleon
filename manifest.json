@@ -1,0 +1,27 @@
+{
+  "name": "ADULAM · Sistema Pastoral",
+  "short_name": "ADULAM",
+  "description": "Sistema de administración pastoral para la iglesia ADULAM",
+  "start_url": "./login.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "categories": ["utilities", "productivity"],
+  "lang": "es",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

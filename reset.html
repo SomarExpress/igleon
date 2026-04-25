@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADULAM · Reset</title>
+<style>body{font-family:system-ui;max-width:420px;margin:60px auto;padding:20px;text-align:center}
+h1{color:#4f46e5}#status{background:#f1f5f9;padding:16px;border-radius:12px;margin:20px 0;text-align:left;font-size:13px;font-family:monospace;line-height:1.8}
+.ok{color:#059669}.err{color:#dc2626}</style></head>
+<body>
+<h1>ADULAM</h1>
+<h2>Limpiando sistema...</h2>
+<div id="status">Iniciando limpieza...</div>
+<script>
+(async function(){
+  var s = document.getElementById('status');
+  var log = '';
+  function msg(t, ok) { log += (ok ? '✅' : '❌') + ' ' + t + '\n'; s.textContent = log; }
+
+  // 1. Desregistrar SW
+  try {
+    var regs = await navigator.serviceWorker.getRegistrations();
+    for (var r of regs) { await r.unregister(); }
+    msg(regs.length + ' Service Worker(s) eliminados', true);
+  } catch(e) { msg('SW: ' + e.message, false); }
+
+  // 2. Borrar cachés
+  try {
+    var keys = await caches.keys();
+    for (var k of keys) { await caches.delete(k); }
+    msg(keys.length + ' caché(s) borrados', true);
+  } catch(e) { msg('Cache: ' + e.message, false); }
+
+  // 3. localStorage
+  try { var n = localStorage.length; localStorage.clear(); msg(n + ' items de localStorage borrados', true); }
+  catch(e) { msg('Storage: ' + e.message, false); }
+
+  // 4. sessionStorage
+  try { sessionStorage.clear(); msg('sessionStorage limpio', true); }
+  catch(e) { msg('Session: ' + e.message, false); }
+
+  log += '\n✅ LISTO. Redirigiendo al login en 3s...';
+  s.textContent = log;
+
+  setTimeout(function() {
+    var p = window.location.pathname;
+    window.location.href = p.substring(0, p.lastIndexOf('/') + 1) + 'login.html';
+  }, 3000);
+})();
+</script>
+</body></html>

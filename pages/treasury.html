@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Tesorería · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  if (!Auth.hasRole(['pastor','lider'])) {
+    document.body.innerHTML = `<div class="min-h-screen flex items-center justify-center p-4">
+      <div class="bg-white rounded-2xl border border-slate-200 p-8 text-center max-w-md">
+        <i data-lucide="lock" class="w-12 h-12 mx-auto text-red-500 mb-3"></i>
+        <h3 class="text-lg font-bold mb-2">Sin acceso</h3>
+        <p class="text-slate-600">Solo pastor y líder pueden ver la tesorería.</p>
+        <a href="dashboard.html" class="inline-block mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg">Volver al dashboard</a>
+      </div>
+    </div>`;
+    lucide.createIcons();
+    return;
+  }
+  document.getElementById('app').innerHTML = UI.renderLayout('Tesorería');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  document.getElementById('pageContent').innerHTML = `
+    <div id="balance" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5"></div>
+    <div class="flex flex-col sm:flex-row gap-3 mb-4">
+      <input id="mes" type="month" value="${new Date().toISOString().slice(0,7)}" class="px-3 py-2.5 border border-slate-300 rounded-lg">
+      <button onclick="cargar()" class="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 rounded-lg font-medium flex items-center justify-center gap-2">
+        <i data-lucide="filter" class="w-4 h-4"></i>Filtrar
+      </button>
+      <button onclick="nuevo()" data-roles="pastor" class="sm:ml-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl flex items-center justify-center gap-2">
+        <i data-lucide="plus" class="w-5 h-5"></i>Registrar movimiento
+      </button>
+    </div>
+    <div id="movimientos"></div>
+  `;
+  UI.refreshIcons();
+  await cargar();
+})();
+
+async function cargar() {
+  const mes = document.getElementById('mes').value;
+  const [anio, m] = mes.split('-');
+  const inicio = `${anio}-${m}-01`;
+  const fin = new Date(parseInt(anio), parseInt(m), 0).toISOString().slice(0,10);
+  const { data } = await supabase.from('treasury').select('*').gte('fecha',inicio).lte('fecha',fin).order('fecha',{ascending:false});
+
+  let ingresos = 0, egresos = 0;
+  (data||[]).forEach(r => r.tipo==='ingreso' ? ingresos += Number(r.monto) : egresos += Number(r.monto));
+
+  document.getElementById('balance').innerHTML = `
+    <div class="bg-white rounded-2xl border border-emerald-200 p-4">
+      <div class="flex items-center gap-2 text-sm text-slate-500 mb-1">
+        <i data-lucide="trending-up" class="w-4 h-4 text-emerald-600"></i>Ingresos
+      </div>
+      <div class="text-xl sm:text-2xl font-bold text-emerald-600">${UI.dinero(ingresos)}</div>
+    </div>
+    <div class="bg-white rounded-2xl border border-red-200 p-4">
+      <div class="flex items-center gap-2 text-sm text-slate-500 mb-1">
+        <i data-lucide="trending-down" class="w-4 h-4 text-red-600"></i>Egresos
+      </div>
+      <div class="text-xl sm:text-2xl font-bold text-red-600">${UI.dinero(egresos)}</div>
+    </div>
+    <div class="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-2xl border border-indigo-200 p-4">
+      <div class="flex items-center gap-2 text-sm text-slate-500 mb-1">
+        <i data-lucide="wallet" class="w-4 h-4 text-indigo-600"></i>Balance
+      </div>
+      <div class="text-xl sm:text-2xl font-bold ${ingresos-egresos>=0?'text-indigo-700':'text-red-700'}">${UI.dinero(ingresos-egresos)}</div>
+    </div>
+  `;
+
+  const cont = document.getElementById('movimientos');
+  if (!data || data.length === 0) {
+    cont.innerHTML = `<div class="bg-white rounded-2xl border border-slate-200 p-8 text-center text-slate-400">
+      <i data-lucide="receipt" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+      <p>Sin movimientos este mes.</p>
+    </div>`;
+    UI.refreshIcons(); return;
+  }
+
+  // Vista cards en móvil, tabla en desktop
+  cont.innerHTML = `
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+      <!-- Tabla desktop -->
+      <table class="w-full text-sm hidden md:table">
+        <thead class="bg-slate-100 text-slate-700">
+          <tr>
+            <th class="p-3 text-left">Fecha</th>
+            <th class="p-3 text-left">Tipo</th>
+            <th class="p-3 text-left">Categoría</th>
+            <th class="p-3 text-left">Descripción</th>
+            <th class="p-3 text-right">Monto</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map(r => `
+            <tr class="border-t border-slate-100 hover:bg-slate-50">
+              <td class="p-3">${UI.fecha(r.fecha)}</td>
+              <td class="p-3"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${r.tipo==='ingreso'?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'}">${r.tipo}</span></td>
+              <td class="p-3 capitalize">${r.categoria}</td>
+              <td class="p-3 text-slate-600">${r.descripcion||''}</td>
+              <td class="p-3 text-right font-semibold ${r.tipo==='ingreso'?'text-emerald-700':'text-red-700'}">${r.tipo==='ingreso'?'+':'-'}${UI.dinero(r.monto)}</td>
+              <td class="p-3"><button onclick="eliminar('${r.id}')" data-roles="pastor" class="text-red-600 hover:bg-red-100 p-1.5 rounded"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <!-- Cards móvil -->
+      <div class="md:hidden divide-y divide-slate-100">
+        ${data.map(r => `
+          <div class="p-4 flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl ${r.tipo==='ingreso'?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700'} flex items-center justify-center flex-shrink-0">
+              <i data-lucide="${r.tipo==='ingreso'?'arrow-down-to-line':'arrow-up-from-line'}" class="w-5 h-5"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="font-semibold capitalize">${r.categoria}</div>
+                  <div class="text-xs text-slate-500">${UI.fecha(r.fecha)}</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-bold ${r.tipo==='ingreso'?'text-emerald-700':'text-red-700'}">${r.tipo==='ingreso'?'+':'-'}${UI.dinero(r.monto)}</div>
+                  <button onclick="eliminar('${r.id}')" data-roles="pastor" class="text-red-600 text-xs mt-1 p-1 hover:bg-red-50 rounded inline-flex items-center gap-1">
+                    <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  </button>
+                </div>
+              </div>
+              ${r.descripcion ? `<div class="text-sm text-slate-600 mt-1">${r.descripcion}</div>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>
+  `;
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+function nuevo() {
+  UI.openModal('modalT', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">Nuevo movimiento</h3>
+      <button onclick="UI.closeModal('modalT')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="tForm" class="p-4 space-y-3">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Tipo</label>
+        <select name="tipo" required class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="ingreso">Ingreso</option>
+          <option value="egreso">Egreso</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Categoría</label>
+        <input name="categoria" required list="catList" placeholder="diezmo, ofrenda, gasto..." class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        <datalist id="catList">
+          <option>diezmo</option><option>ofrenda</option><option>gasto</option>
+          <option>servicios</option><option>misión</option><option>mantenimiento</option>
+        </datalist>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Monto</label>
+        <input name="monto" type="number" step="0.01" min="0" required inputmode="decimal" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Fecha</label>
+        <input name="fecha" type="date" value="${new Date().toISOString().slice(0,10)}" required class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Descripción</label>
+        <textarea name="descripcion" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg" rows="2"></textarea>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('modalT')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('tForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = {
+      tipo: fd.get('tipo'),
+      categoria: fd.get('categoria').toLowerCase(),
+      monto: parseFloat(fd.get('monto')),
+      fecha: fd.get('fecha'),
+      descripcion: fd.get('descripcion') || null,
+      registrado_por: Auth.currentUser.id
+    };
+    const { error } = await supabase.from('treasury').insert(payload);
+    if (error) UI.toast(error.message, 'error');
+    else { UI.toast('Registrado','success'); UI.closeModal('modalT'); cargar(); }
+  };
+}
+
+async function eliminar(id) {
+  if (!confirm('¿Eliminar este movimiento?')) return;
+  const { error } = await supabase.from('treasury').delete().eq('id', id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Eliminado','success'); cargar(); }
+}
+
+window.cargar = cargar;
+window.nuevo = nuevo;
+window.eliminar = eliminar;
+</script>
+</body>
+</html>

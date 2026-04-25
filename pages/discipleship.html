@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Discipulado · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+<style>.diploma { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 50%, #fcd34d 100%); border: 8px double #92400e; }</style>
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+let miembrosCache = [];
+let cursoActivo = null;
+let cohorteActiva = null;
+
+const COLORES = {
+  indigo:  { bg:'bg-indigo-50', border:'border-indigo-200', text:'text-indigo-700', btn:'bg-indigo-600 hover:bg-indigo-700' },
+  emerald: { bg:'bg-emerald-50', border:'border-emerald-200', text:'text-emerald-700', btn:'bg-emerald-600 hover:bg-emerald-700' },
+  amber:   { bg:'bg-amber-50', border:'border-amber-200', text:'text-amber-700', btn:'bg-amber-600 hover:bg-amber-700' },
+  violet:  { bg:'bg-violet-50', border:'border-violet-200', text:'text-violet-700', btn:'bg-violet-600 hover:bg-violet-700' },
+  rose:    { bg:'bg-rose-50', border:'border-rose-200', text:'text-rose-700', btn:'bg-rose-600 hover:bg-rose-700' }
+};
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Discipulado');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+  const { data } = await supabase.from('members').select('id, nombre').order('nombre');
+  miembrosCache = data || [];
+  await mostrarCursos();
+})();
+
+async function mostrarCursos() {
+  cursoActivo = null; cohorteActiva = null;
+  const { data: cursos } = await supabase.from('discipleship_courses').select('*').order('orden');
+
+  const contadores = {};
+  for (const c of (cursos||[])) {
+    const { count: nlec } = await supabase.from('discipleship_lessons').select('*',{count:'exact',head:true}).eq('course_id', c.id);
+    const { count: ncoh } = await supabase.from('discipleship_cohorts').select('*',{count:'exact',head:true}).eq('course_id', c.id);
+    contadores[c.id] = { nlec: nlec||0, ncoh: ncoh||0 };
+  }
+
+  document.getElementById('pageContent').innerHTML = `
+    <div class="mb-5 flex flex-wrap justify-between items-center gap-3">
+      <div>
+        <h3 class="text-lg sm:text-xl font-bold text-slate-800">Cursos de discipulado</h3>
+        <p class="text-xs sm:text-sm text-slate-500">Rutas de crecimiento. Cada curso tiene varias promociones.</p>
+      </div>
+      <button onclick="formCurso()" data-roles="pastor,lider" class="px-4 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-95 text-white font-semibold rounded-xl flex items-center gap-2">
+        <i data-lucide="plus" class="w-4 h-4"></i>Nuevo curso
+      </button>
+    </div>
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      ${(cursos||[]).map(c => {
+        const col = COLORES[c.color] || COLORES.indigo;
+        return `
+          <div class="${col.bg} rounded-2xl border ${col.border} p-5 hover:shadow-md transition cursor-pointer active:scale-[0.98]" onclick="mostrarCurso('${c.id}')">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="text-3xl">${c.icono}</div>
+              <div class="flex-1 min-w-0">
+                <div class="text-xs uppercase tracking-wider ${col.text}">Nivel ${c.nivel}</div>
+                <h4 class="font-bold text-slate-800 truncate">${c.nombre}</h4>
+              </div>
+            </div>
+            <p class="text-sm text-slate-600 mb-3 line-clamp-2">${c.descripcion||''}</p>
+            <div class="flex gap-3 text-xs text-slate-500">
+              <span class="flex items-center gap-1"><i data-lucide="book-open" class="w-3 h-3"></i>${contadores[c.id].nlec} lecciones</span>
+              <span class="flex items-center gap-1"><i data-lucide="graduation-cap" class="w-3 h-3"></i>${contadores[c.id].ncoh} promociones</span>
+            </div>
+          </div>`;
+      }).join('')}
+      ${(!cursos||cursos.length===0)?`<div class="col-span-full text-center py-12 text-slate-400">
+        <i data-lucide="book-open" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+        <p>Sin cursos. Haz clic en "Nuevo curso".</p>
+      </div>`:''}
+    </div>
+  `;
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+function formCurso(c) {
+  c = c || {};
+  const coloresOpts = Object.keys(COLORES).map(col => `<option value="${col}" ${c.color===col?'selected':''}>${col}</option>`).join('');
+  UI.openModal('mc', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${c.id?'Editar':'Nuevo'} curso</h3>
+      <button onclick="UI.closeModal('mc')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="cForm" class="p-4 space-y-3">
+      <input type="hidden" name="id" value="${c.id||''}">
+      <div class="grid grid-cols-4 gap-2">
+        <input name="icono" placeholder="📖" value="${c.icono||'📖'}" maxlength="3" class="px-3 py-2.5 border border-slate-300 rounded-lg text-center text-2xl">
+        <input name="nombre" required placeholder="Nombre del curso" value="${c.nombre||''}" class="col-span-3 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <textarea name="descripcion" placeholder="Descripción" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg" rows="2">${c.descripcion||''}</textarea>
+      <div class="grid grid-cols-3 gap-2">
+        <div>
+          <label class="text-xs text-slate-500">Nivel</label>
+          <input name="nivel" type="number" min="1" value="${c.nivel||1}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">Orden</label>
+          <input name="orden" type="number" value="${c.orden||0}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">Color</label>
+          <select name="color" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">${coloresOpts}</select>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-slate-500">% asistencia mín.</label>
+          <input name="min_asistencia" type="number" min="0" max="100" value="${c.min_asistencia??80}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">Nota mínima</label>
+          <input name="nota_minima" type="number" step="0.01" min="0" max="100" value="${c.nota_minima??70}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('mc')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('cForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      nombre: fd.get('nombre'), icono: fd.get('icono') || '📖',
+      descripcion: fd.get('descripcion') || null,
+      nivel: parseInt(fd.get('nivel'))||1, orden: parseInt(fd.get('orden'))||0,
+      color: fd.get('color')||'indigo',
+      min_asistencia: parseInt(fd.get('min_asistencia'))||80,
+      nota_minima: parseFloat(fd.get('nota_minima'))||70
+    };
+    const { error } = id
+      ? await supabase.from('discipleship_courses').update(payload).eq('id', id)
+      : await supabase.from('discipleship_courses').insert(payload);
+    if (error) UI.toast(error.message, 'error');
+    else { UI.toast('Guardado','success'); UI.closeModal('mc'); (cursoActivo?mostrarCurso(cursoActivo.id):mostrarCursos()); }
+  };
+}
+
+async function mostrarCurso(cursoId) {
+  const { data: c } = await supabase.from('discipleship_courses').select('*').eq('id', cursoId).single();
+  cursoActivo = c;
+  const { data: lessons } = await supabase.from('discipleship_lessons').select('*').eq('course_id', cursoId).order('numero');
+  const { data: cohorts } = await supabase.from('discipleship_cohorts').select('*, members!discipleship_cohorts_maestro_id_fkey(nombre)').eq('course_id', cursoId).order('fecha_inicio',{ascending:false});
+
+  const col = COLORES[c.color] || COLORES.indigo;
+
+  document.getElementById('pageContent').innerHTML = `
+    <button onclick="mostrarCursos()" class="text-sm text-slate-500 hover:text-indigo-600 mb-3 flex items-center gap-1">
+      <i data-lucide="arrow-left" class="w-4 h-4"></i>Volver a cursos
+    </button>
+    <div class="${col.bg} border ${col.border} rounded-2xl p-5 mb-5">
+      <div class="flex items-start gap-3 flex-wrap">
+        <div class="text-4xl sm:text-5xl">${c.icono}</div>
+        <div class="flex-1 min-w-0">
+          <div class="text-xs uppercase ${col.text}">Nivel ${c.nivel}</div>
+          <h3 class="text-xl sm:text-2xl font-bold">${c.nombre}</h3>
+          <p class="text-sm text-slate-600 mt-1">${c.descripcion||''}</p>
+          <div class="flex gap-3 text-xs text-slate-500 mt-2 flex-wrap">
+            <span class="flex items-center gap-1"><i data-lucide="percent" class="w-3 h-3"></i>Asist. mín: ${c.min_asistencia}%</span>
+            <span class="flex items-center gap-1"><i data-lucide="star" class="w-3 h-3"></i>Nota mín: ${c.nota_minima}</span>
+          </div>
+        </div>
+        <div class="flex gap-1 flex-shrink-0">
+          <button onclick='formCurso(${JSON.stringify(c).replace(/'/g,"&#39;")})' data-roles="pastor,lider" class="p-2 bg-white border border-slate-200 rounded-lg"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+          <button onclick="eliminarCurso('${c.id}','${c.nombre.replace(/'/g,"\\'")}')" data-roles="pastor" class="p-2 bg-red-100 text-red-700 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h4 class="font-bold flex items-center gap-1.5"><i data-lucide="book-open" class="w-4 h-4"></i>Lecciones (${(lessons||[]).length})</h4>
+        <button onclick="formLeccion('${c.id}')" data-roles="pastor,lider,servidor" class="px-3 py-2 ${col.btn} text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>Agregar
+        </button>
+      </div>
+      <div class="space-y-2">
+        ${(lessons||[]).map(l => `
+          <div class="border border-slate-200 rounded-xl p-3 flex items-start gap-3">
+            <div class="w-10 h-10 rounded-full ${col.bg} ${col.text} flex items-center justify-center font-bold flex-shrink-0">${l.numero}</div>
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold">${l.titulo}</div>
+              ${l.descripcion ? `<div class="text-sm text-slate-600">${l.descripcion}</div>`:''}
+              <div class="flex flex-wrap gap-3 mt-1 text-xs">
+                ${l.pdf_url ? `<a href="${l.pdf_url}" target="_blank" class="text-indigo-600 hover:underline flex items-center gap-0.5"><i data-lucide="file-text" class="w-3 h-3"></i>PDF</a>`:''}
+                ${l.video_url ? `<a href="${l.video_url}" target="_blank" class="text-red-600 hover:underline flex items-center gap-0.5"><i data-lucide="video" class="w-3 h-3"></i>Video</a>`:''}
+                ${l.material_extra ? `<a href="${l.material_extra}" target="_blank" class="text-slate-600 hover:underline flex items-center gap-0.5"><i data-lucide="link" class="w-3 h-3"></i>Extra</a>`:''}
+              </div>
+            </div>
+            <div class="flex gap-1">
+              <button onclick='formLeccion("${c.id}", ${JSON.stringify(l).replace(/'/g,"&#39;")})' class="p-1.5 hover:bg-slate-100 rounded"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+              <button onclick="eliminarLeccion('${l.id}')" data-roles="pastor,lider" class="p-1.5 hover:bg-red-100 rounded text-red-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+            </div>
+          </div>
+        `).join('') || '<p class="text-slate-400 text-sm text-center py-4">Sin lecciones. Agrega la primera.</p>'}
+      </div>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h4 class="font-bold flex items-center gap-1.5"><i data-lucide="graduation-cap" class="w-4 h-4"></i>Promociones (${(cohorts||[]).length})</h4>
+        <button onclick="formCohorte('${c.id}')" data-roles="pastor,lider" class="px-3 py-2 ${col.btn} text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>Nueva
+        </button>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        ${(cohorts||[]).map(co => {
+          const badge = co.estado==='activo'?'bg-emerald-100 text-emerald-700':co.estado==='finalizado'?'bg-slate-200 text-slate-700':'bg-red-100 text-red-700';
+          return `
+            <div class="border border-slate-200 rounded-xl p-3 hover:shadow-md transition cursor-pointer active:scale-[0.98]" onclick="mostrarCohorte('${co.id}')">
+              <div class="flex items-center justify-between mb-1 gap-2">
+                <div class="font-semibold truncate">${co.nombre}</div>
+                <span class="text-xs px-2 py-0.5 rounded-full ${badge} flex-shrink-0">${co.estado}</span>
+              </div>
+              <div class="text-xs text-slate-500 space-y-0.5">
+                ${co.fecha_inicio ? `<div class="flex items-center gap-1"><i data-lucide="calendar" class="w-3 h-3"></i>${UI.fecha(co.fecha_inicio)} → ${co.fecha_fin?UI.fecha(co.fecha_fin):'?'}</div>`:''}
+                ${co.members ? `<div class="flex items-center gap-1"><i data-lucide="user-check" class="w-3 h-3"></i>${co.members.nombre}</div>`:''}
+              </div>
+            </div>`;
+        }).join('') || '<p class="text-slate-400 text-sm col-span-full text-center py-4">Sin promociones.</p>'}
+      </div>
+    </div>
+  `;
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+async function eliminarCurso(id, nombre) {
+  if (!confirm(`¿Eliminar curso "${nombre}" con TODAS sus lecciones y promociones?`)) return;
+  const { error } = await supabase.from('discipleship_courses').delete().eq('id', id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Eliminado','success'); mostrarCursos(); }
+}
+
+function formLeccion(courseId, l) {
+  l = l || {};
+  UI.openModal('ml', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${l.id?'Editar':'Nueva'} lección</h3>
+      <button onclick="UI.closeModal('ml')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="lForm" class="p-4 space-y-3">
+      <input type="hidden" name="id" value="${l.id||''}">
+      <div class="grid grid-cols-4 gap-2">
+        <div>
+          <label class="text-xs text-slate-500">N°</label>
+          <input name="numero" type="number" required min="1" value="${l.numero||1}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div class="col-span-3">
+          <label class="text-xs text-slate-500">Título *</label>
+          <input name="titulo" required value="${l.titulo||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <textarea name="descripcion" placeholder="Breve descripción" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg" rows="2">${l.descripcion||''}</textarea>
+      <textarea name="contenido" placeholder="Contenido/guión completo (opcional)" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" rows="3">${l.contenido||''}</textarea>
+      <div class="space-y-2">
+        <div class="relative">
+          <i data-lucide="file-text" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input name="pdf_url" placeholder="URL del PDF (Drive, Dropbox...)" value="${l.pdf_url||''}" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div class="relative">
+          <i data-lucide="video" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input name="video_url" placeholder="URL del video (YouTube...)" value="${l.video_url||''}" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div class="relative">
+          <i data-lucide="link" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input name="material_extra" placeholder="Material extra" value="${l.material_extra||''}" class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('ml')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('lForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      course_id: courseId,
+      numero: parseInt(fd.get('numero'))||1,
+      titulo: fd.get('titulo'),
+      descripcion: fd.get('descripcion') || null,
+      contenido: fd.get('contenido') || null,
+      pdf_url: fd.get('pdf_url') || null,
+      video_url: fd.get('video_url') || null,
+      material_extra: fd.get('material_extra') || null
+    };
+    const { error } = id
+      ? await supabase.from('discipleship_lessons').update(payload).eq('id', id)
+      : await supabase.from('discipleship_lessons').insert(payload);
+    if (error) UI.toast(error.message,'error');
+    else { UI.toast('Lección guardada','success'); UI.closeModal('ml'); mostrarCurso(courseId); }
+  };
+}
+
+async function eliminarLeccion(id) {
+  if (!confirm('¿Eliminar esta lección?')) return;
+  const { error } = await supabase.from('discipleship_lessons').delete().eq('id', id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Eliminada','success'); if(cursoActivo) mostrarCurso(cursoActivo.id); }
+}
+
+function formCohorte(courseId, co) {
+  co = co || {};
+  const maestrosOpts = miembrosCache.map(m => `<option value="${m.id}" ${co.maestro_id===m.id?'selected':''}>${m.nombre}</option>`).join('');
+  UI.openModal('mco', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${co.id?'Editar':'Nueva'} promoción</h3>
+      <button onclick="UI.closeModal('mco')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="coForm" class="p-4 space-y-3">
+      <input type="hidden" name="id" value="${co.id||''}">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Nombre *</label>
+        <input name="nombre" required placeholder="Ej: Enero 2026" value="${co.nombre||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-slate-500">Inicio</label>
+          <input name="fecha_inicio" type="date" value="${co.fecha_inicio||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500">Fin</label>
+          <input name="fecha_fin" type="date" value="${co.fecha_fin||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Maestro / Facilitador</label>
+        <select name="maestro_id" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="">Sin asignar</option>${maestrosOpts}
+        </select>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Estado</label>
+        <select name="estado" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="activo" ${co.estado==='activo'?'selected':''}>Activo</option>
+          <option value="finalizado" ${co.estado==='finalizado'?'selected':''}>Finalizado</option>
+          <option value="cancelado" ${co.estado==='cancelado'?'selected':''}>Cancelado</option>
+        </select>
+      </div>
+      <textarea name="notas" placeholder="Notas" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg" rows="2">${co.notas||''}</textarea>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('mco')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('coForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      course_id: courseId,
+      nombre: fd.get('nombre'),
+      fecha_inicio: fd.get('fecha_inicio') || null,
+      fecha_fin: fd.get('fecha_fin') || null,
+      maestro_id: fd.get('maestro_id') || null,
+      estado: fd.get('estado') || 'activo',
+      notas: fd.get('notas') || null
+    };
+    const { error } = id
+      ? await supabase.from('discipleship_cohorts').update(payload).eq('id', id)
+      : await supabase.from('discipleship_cohorts').insert(payload);
+    if (error) UI.toast(error.message,'error');
+    else { UI.toast('Guardada','success'); UI.closeModal('mco'); mostrarCurso(courseId); }
+  };
+}
+
+async function mostrarCohorte(cohortId) {
+  const { data: co } = await supabase.from('discipleship_cohorts')
+    .select('*, discipleship_courses(*), members!discipleship_cohorts_maestro_id_fkey(nombre)')
+    .eq('id', cohortId).single();
+  cohorteActiva = co;
+  const curso = co.discipleship_courses;
+  const col = COLORES[curso.color] || COLORES.indigo;
+
+  const { data: lessons } = await supabase.from('discipleship_lessons').select('*').eq('course_id', curso.id).order('numero');
+  const { data: participants } = await supabase.from('v_discipleship_progress').select('*').eq('cohort_id', cohortId).order('miembro_nombre');
+  const { data: attendance } = await supabase.from('discipleship_attendance').select('*').eq('cohort_id', cohortId);
+
+  const attMap = {};
+  (attendance||[]).forEach(a => {
+    if (!attMap[a.member_id]) attMap[a.member_id] = {};
+    attMap[a.member_id][a.lesson_id] = a;
+  });
+
+  document.getElementById('pageContent').innerHTML = `
+    <button onclick="mostrarCurso('${curso.id}')" class="text-sm text-slate-500 hover:text-indigo-600 mb-3 flex items-center gap-1">
+      <i data-lucide="arrow-left" class="w-4 h-4"></i>Volver a ${curso.nombre}
+    </button>
+
+    <div class="${col.bg} border ${col.border} rounded-2xl p-4 sm:p-5 mb-5 flex items-start justify-between flex-wrap gap-3">
+      <div class="min-w-0 flex-1">
+        <div class="text-xs uppercase ${col.text}">${curso.icono} ${curso.nombre} · ${co.estado.toUpperCase()}</div>
+        <h3 class="text-xl sm:text-2xl font-bold">${co.nombre}</h3>
+        <div class="text-xs sm:text-sm text-slate-600 mt-1 flex flex-wrap gap-3">
+          ${co.fecha_inicio?`<span class="flex items-center gap-1"><i data-lucide="calendar" class="w-3.5 h-3.5"></i>${UI.fecha(co.fecha_inicio)} → ${co.fecha_fin?UI.fecha(co.fecha_fin):'?'}</span>`:''}
+          ${co.members?`<span class="flex items-center gap-1"><i data-lucide="user-check" class="w-3.5 h-3.5"></i>${co.members.nombre}</span>`:''}
+        </div>
+      </div>
+      <div class="flex gap-1">
+        <button onclick='formCohorte("${curso.id}", ${JSON.stringify(co).replace(/'/g,"&#39;")})' data-roles="pastor,lider" class="p-2 bg-white border border-slate-200 rounded-lg"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+        <button onclick="eliminarCohorte('${co.id}','${co.nombre.replace(/'/g,"\\'")}', '${curso.id}')" data-roles="pastor" class="p-2 bg-red-100 text-red-700 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-2 mb-4">
+      <button onclick="agregarParticipantes('${co.id}')" data-roles="pastor,lider,servidor" class="px-4 py-2.5 ${col.btn} text-white rounded-xl font-semibold flex items-center gap-2">
+        <i data-lucide="user-plus" class="w-4 h-4"></i>Agregar participantes
+      </button>
+      <button onclick="calcularAprobacion('${co.id}')" data-roles="pastor,lider" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold flex items-center gap-2">
+        <i data-lucide="target" class="w-4 h-4"></i>Calcular aprobación
+      </button>
+    </div>
+
+    ${lessons.length === 0 ? '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 flex items-center gap-2"><i data-lucide="alert-triangle" class="w-5 h-5 text-amber-700"></i><p class="text-amber-800 text-sm">Este curso no tiene lecciones. Agrégalas antes de tomar asistencia.</p></div>' : ''}
+
+    <div class="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-100">
+          <tr>
+            <th class="p-3 text-left sticky left-0 bg-slate-100 z-10 min-w-[140px]">Participante</th>
+            ${(lessons||[]).map(l => `<th class="p-2 text-center min-w-[48px]" title="${l.titulo}">L${l.numero}</th>`).join('')}
+            <th class="p-2 text-center bg-slate-200">% Asist.</th>
+            <th class="p-2 text-center bg-slate-200">Nota</th>
+            <th class="p-2 text-center bg-slate-200">Estado</th>
+            <th class="p-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${(participants||[]).length === 0 ?
+            `<tr><td colspan="${(lessons||[]).length + 5}" class="p-6 text-slate-400 text-center">Sin participantes inscritos.</td></tr>`
+            :
+            (participants||[]).map(p => {
+              const pasaAsist = p.porcentaje_asistencia >= p.curso_min_asistencia;
+              return `
+                <tr class="border-t hover:bg-slate-50">
+                  <td class="p-3 font-medium sticky left-0 bg-white z-10">${p.miembro_nombre}</td>
+                  ${(lessons||[]).map(l => {
+                    const a = attMap[p.member_id]?.[l.id];
+                    const ok = a && a.asistio;
+                    return `<td class="p-1 text-center">
+                      <input type="checkbox" ${ok?'checked':''} onchange="marcarLeccion('${co.id}','${l.id}','${p.member_id}',this.checked)" class="w-5 h-5 accent-emerald-600">
+                    </td>`;
+                  }).join('')}
+                  <td class="p-2 text-center font-semibold ${pasaAsist?'text-emerald-600':'text-red-600'}">${p.porcentaje_asistencia||0}%</td>
+                  <td class="p-2 text-center">
+                    <input type="number" step="0.01" min="0" max="100" value="${p.nota_final??''}" placeholder="—" onchange="actualizarNota('${p.participant_id}',this.value)" class="w-14 px-1 py-1 border rounded text-center text-xs">
+                  </td>
+                  <td class="p-2 text-center">
+                    ${p.aprobado===true?'<span class="text-emerald-600 font-bold text-xs flex items-center justify-center gap-0.5"><i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i>Aprobado</span>':
+                      p.aprobado===false?'<span class="text-red-600 font-bold text-xs flex items-center justify-center gap-0.5"><i data-lucide="x-circle" class="w-3.5 h-3.5"></i>Reprobado</span>':
+                      '<span class="text-slate-400">—</span>'}
+                  </td>
+                  <td class="p-2 text-center whitespace-nowrap">
+                    ${p.aprobado ? `<button onclick="verDiploma('${p.participant_id}')" class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white text-xs rounded font-medium flex items-center gap-1 inline-flex"><i data-lucide="award" class="w-3 h-3"></i>Diploma</button>` : ''}
+                    <button onclick="eliminarParticipante('${p.participant_id}','${p.miembro_nombre.replace(/'/g,"\\'")}')" data-roles="pastor,lider" class="p-1 hover:bg-red-100 rounded text-red-600 text-xs"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+                  </td>
+                </tr>`;
+            }).join('')
+          }
+        </tbody>
+      </table>
+    </div>
+  `;
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+async function eliminarCohorte(id, nombre, courseId) {
+  if (!confirm(`¿Eliminar promoción "${nombre}"?`)) return;
+  const { error } = await supabase.from('discipleship_cohorts').delete().eq('id', id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Eliminada','success'); mostrarCurso(courseId); }
+}
+
+async function agregarParticipantes(cohortId) {
+  const { data: existentes } = await supabase.from('discipleship_participants').select('member_id').eq('cohort_id', cohortId);
+  const yaInscritos = new Set((existentes||[]).map(e => e.member_id));
+  const disponibles = miembrosCache.filter(m => !yaInscritos.has(m.id));
+
+  if (disponibles.length === 0) { UI.toast('Todos ya están inscritos','info'); return; }
+
+  UI.openModal('map', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">Agregar participantes</h3>
+      <button onclick="UI.closeModal('map')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <div class="p-4">
+      <div class="relative mb-3">
+        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+        <input id="filtroPart" placeholder="Filtrar..." class="w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div id="listaPart" class="max-h-80 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1">
+        ${disponibles.map(m => `
+          <label class="flex items-center gap-2 p-3 hover:bg-indigo-50 rounded-lg cursor-pointer">
+            <input type="checkbox" value="${m.id}" class="partCheck accent-indigo-600 w-4 h-4">
+            <span class="text-sm">${m.nombre}</span>
+          </label>`).join('')}
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button onclick="UI.closeModal('map')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button onclick="guardarParticipantes('${cohortId}')" class="flex-1 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="plus" class="w-4 h-4"></i>Agregar
+        </button>
+      </div>
+    </div>
+  `);
+  document.getElementById('filtroPart').oninput = (e) => {
+    const q = e.target.value.toLowerCase();
+    document.querySelectorAll('#listaPart label').forEach(l => {
+      l.style.display = l.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+  };
+}
+
+async function guardarParticipantes(cohortId) {
+  const ids = Array.from(document.querySelectorAll('.partCheck:checked')).map(c => c.value);
+  if (ids.length === 0) { UI.toast('Selecciona al menos uno','warning'); return; }
+  const rows = ids.map(member_id => ({ cohort_id: cohortId, member_id }));
+  const { error } = await supabase.from('discipleship_participants').insert(rows);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast(`${ids.length} agregados`,'success'); UI.closeModal('map'); mostrarCohorte(cohortId); }
+}
+
+async function marcarLeccion(cohortId, lessonId, memberId, asistio) {
+  const payload = { cohort_id: cohortId, lesson_id: lessonId, member_id: memberId, asistio, fecha: new Date().toISOString().slice(0,10) };
+  const { error } = await supabase.from('discipleship_attendance').upsert(payload, { onConflict: 'cohort_id,lesson_id,member_id' });
+  if (error) UI.toast(error.message,'error');
+  else mostrarCohorte(cohortId);
+}
+
+async function actualizarNota(participantId, nota) {
+  const n = nota === '' ? null : parseFloat(nota);
+  const { error } = await supabase.from('discipleship_participants').update({ nota_final: n }).eq('id', participantId);
+  if (error) UI.toast(error.message,'error');
+  else UI.toast('Nota guardada','success');
+}
+
+async function calcularAprobacion(cohortId) {
+  if (!confirm('¿Calcular aprobación automática según % asistencia y nota mínima?')) return;
+  const { data: progress } = await supabase.from('v_discipleship_progress').select('*').eq('cohort_id', cohortId);
+  for (const p of (progress||[])) {
+    const pasaAsist = p.porcentaje_asistencia >= p.curso_min_asistencia;
+    const pasaNota = (p.nota_final??-1) >= p.curso_nota_minima;
+    const aprobado = pasaAsist && pasaNota;
+    await supabase.from('discipleship_participants').update({ aprobado }).eq('id', p.participant_id);
+  }
+  UI.toast('Aprobación calculada','success');
+  mostrarCohorte(cohortId);
+}
+
+async function eliminarParticipante(id, nombre) {
+  if (!confirm(`¿Quitar a ${nombre}?`)) return;
+  const { error } = await supabase.from('discipleship_participants').delete().eq('id', id);
+  if (error) UI.toast(error.message,'error');
+  else { UI.toast('Eliminado','success'); if(cohorteActiva) mostrarCohorte(cohorteActiva.id); }
+}
+
+async function verDiploma(participantId) {
+  const { data: p } = await supabase.from('v_discipleship_progress').select('*').eq('participant_id', participantId).single();
+  const fecha = new Date().toLocaleDateString('es-HN', { day:'numeric', month:'long', year:'numeric' });
+
+  UI.openModal('mDipl', `
+    <div class="p-0 overflow-hidden">
+      <div id="diploma" class="diploma p-6 sm:p-10 text-center">
+        <div class="text-xs uppercase tracking-widest text-amber-900 mb-2">Iglesia ADULAM</div>
+        <h2 class="text-2xl sm:text-3xl font-bold text-amber-900 mb-6" style="font-family: Georgia, serif">Diploma de Finalización</h2>
+        <p class="text-sm text-amber-800 mb-1">Se otorga el presente diploma a</p>
+        <div class="text-2xl sm:text-4xl font-bold my-4 text-amber-950" style="font-family: Georgia, serif">${p.miembro_nombre}</div>
+        <p class="text-sm text-amber-800 mb-2">por haber completado satisfactoriamente el curso de</p>
+        <div class="text-xl sm:text-2xl font-bold text-amber-900 mb-6">${p.curso_nombre}</div>
+        <div class="grid grid-cols-2 gap-4 text-sm text-amber-900 mb-6">
+          <div><div class="font-bold">Asistencia</div><div>${p.porcentaje_asistencia}%</div></div>
+          <div><div class="font-bold">Calificación</div><div>${p.nota_final||'—'}</div></div>
+        </div>
+        <div class="text-xs text-amber-800 mb-8">Promoción ${p.cohort_nombre}</div>
+        <div class="border-t-2 border-amber-900 pt-4 w-48 mx-auto text-xs text-amber-900">${fecha}<br>López Arellano, Honduras</div>
+      </div>
+      <div class="p-4 bg-slate-100 flex gap-2 no-print">
+        <button onclick="descargarDiploma()" class="flex-1 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="download" class="w-4 h-4"></i>Descargar
+        </button>
+        <button onclick="UI.closeModal('mDipl')" class="py-3 px-6 bg-slate-300 rounded-xl">Cerrar</button>
+      </div>
+    </div>
+  `);
+  await supabase.from('discipleship_participants').update({ diploma_generado: true }).eq('id', participantId);
+}
+
+async function descargarDiploma() {
+  UI.toast('Generando...', 'info');
+  try {
+    if (!window.html2canvas) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    const el = document.getElementById('diploma');
+    const canvas = await html2canvas(el, { scale: 2, backgroundColor: '#fef3c7' });
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `diploma-adulam-${new Date().toISOString().slice(0,10)}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      UI.toast('Diploma descargado','success');
+    });
+  } catch (err) {
+    UI.toast('Error: ' + err.message, 'error');
+  }
+}
+
+window.mostrarCursos = mostrarCursos;
+window.mostrarCurso = mostrarCurso;
+window.mostrarCohorte = mostrarCohorte;
+window.formCurso = formCurso;
+window.eliminarCurso = eliminarCurso;
+window.formLeccion = formLeccion;
+window.eliminarLeccion = eliminarLeccion;
+window.formCohorte = formCohorte;
+window.eliminarCohorte = eliminarCohorte;
+window.agregarParticipantes = agregarParticipantes;
+window.guardarParticipantes = guardarParticipantes;
+window.marcarLeccion = marcarLeccion;
+window.actualizarNota = actualizarNota;
+window.calcularAprobacion = calcularAprobacion;
+window.eliminarParticipante = eliminarParticipante;
+window.verDiploma = verDiploma;
+window.descargarDiploma = descargarDiploma;
+</script>
+</body>
+</html>

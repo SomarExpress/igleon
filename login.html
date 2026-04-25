@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>ADULAM · Iniciar Sesión</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="assets/styles.css">
+<style>
+  .bg-pattern {
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(at 25% 15%, rgba(99,102,241,0.12) 0px, transparent 50%),
+      radial-gradient(at 75% 85%, rgba(139,92,246,0.12) 0px, transparent 50%);
+  }
+</style>
+</head>
+<body class="min-h-screen bg-pattern flex items-center justify-center p-4 safe-bottom">
+
+<div class="w-full max-w-md">
+  <div class="text-center mb-6 sm:mb-8">
+    <div class="inline-flex w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-700 items-center justify-center text-white text-3xl sm:text-4xl font-bold shadow-xl mb-4">A</div>
+    <h1 class="text-2xl sm:text-3xl font-bold text-slate-800">ADULAM</h1>
+    <p class="text-slate-500 text-sm mt-1">Sistema de Administración Pastoral</p>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 sm:p-8">
+    <div class="flex mb-6 bg-slate-100 rounded-xl p-1">
+      <button id="tabLogin" class="flex-1 py-2.5 font-semibold text-sm rounded-lg bg-white text-indigo-700 shadow-sm transition">Iniciar sesión</button>
+      <button id="tabRegister" class="flex-1 py-2.5 font-semibold text-sm rounded-lg text-slate-500 transition">Registrarse</button>
+    </div>
+
+    <form id="formLogin" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Correo electrónico</label>
+        <div class="relative">
+          <i data-lucide="mail" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="email" id="loginEmail" required autocomplete="email" class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Contraseña</label>
+        <div class="relative">
+          <i data-lucide="lock" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="password" id="loginPassword" required autocomplete="current-password" class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
+        </div>
+      </div>
+      <button type="submit" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2">
+        <i data-lucide="log-in" class="w-5 h-5"></i>
+        Entrar
+      </button>
+    </form>
+
+    <form id="formRegister" class="space-y-4 hidden">
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Nombre completo</label>
+        <div class="relative">
+          <i data-lucide="user" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="text" id="regNombre" required class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Correo electrónico</label>
+        <div class="relative">
+          <i data-lucide="mail" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="email" id="regEmail" required class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-700 mb-1.5">Contraseña (mín. 6 caracteres)</label>
+        <div class="relative">
+          <i data-lucide="lock" class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+          <input type="password" id="regPassword" minlength="6" required class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+        </div>
+      </div>
+      <button type="submit" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2">
+        <i data-lucide="user-plus" class="w-5 h-5"></i>
+        Crear cuenta
+      </button>
+      <p class="text-xs text-slate-500 text-center">El rol de acceso será asignado por un administrador.</p>
+    </form>
+
+    <div id="mensaje" class="mt-4 text-sm text-center"></div>
+  </div>
+
+  <p class="text-center text-xs text-slate-400 mt-6">ADULAM MVP · v1.3</p>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/auth.js"></script>
+<script>
+  lucide.createIcons();
+  (async function(){
+    const session = await Auth.getSession();
+    if (session) window.location.href = Auth._dashboardUrl();
+  })();
+
+  const tabLogin = document.getElementById('tabLogin');
+  const tabRegister = document.getElementById('tabRegister');
+  const formLogin = document.getElementById('formLogin');
+  const formRegister = document.getElementById('formRegister');
+  const mensaje = document.getElementById('mensaje');
+
+  tabLogin.onclick = () => {
+    tabLogin.className = 'flex-1 py-2.5 font-semibold text-sm rounded-lg bg-white text-indigo-700 shadow-sm transition';
+    tabRegister.className = 'flex-1 py-2.5 font-semibold text-sm rounded-lg text-slate-500 transition';
+    formLogin.classList.remove('hidden'); formRegister.classList.add('hidden');
+    mensaje.textContent = '';
+  };
+  tabRegister.onclick = () => {
+    tabRegister.className = 'flex-1 py-2.5 font-semibold text-sm rounded-lg bg-white text-indigo-700 shadow-sm transition';
+    tabLogin.className = 'flex-1 py-2.5 font-semibold text-sm rounded-lg text-slate-500 transition';
+    formRegister.classList.remove('hidden'); formLogin.classList.add('hidden');
+    mensaje.textContent = '';
+  };
+
+  formLogin.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    mensaje.innerHTML = '<span class="text-slate-500">Entrando...</span>';
+    try {
+      await Auth.login(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
+      window.location.href = Auth._dashboardUrl();
+    } catch (err) {
+      mensaje.innerHTML = '<span class="text-red-600">' + (err.message || 'Error') + '</span>';
+    }
+  });
+
+  formRegister.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    mensaje.innerHTML = '<span class="text-slate-500">Creando cuenta...</span>';
+    try {
+      await Auth.register(document.getElementById('regEmail').value, document.getElementById('regPassword').value, document.getElementById('regNombre').value);
+      mensaje.innerHTML = '<span class="text-emerald-600">Cuenta creada. Ya puedes iniciar sesión.</span>';
+    } catch (err) {
+      mensaje.innerHTML = '<span class="text-red-600">' + (err.message || 'Error') + '</span>';
+    }
+  });
+</script>
+</body>
+</html>

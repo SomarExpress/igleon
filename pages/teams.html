@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Ministerios · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+let miembrosCache = [];
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Ministerios');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  document.getElementById('pageContent').innerHTML = `
+    <div class="flex gap-3 mb-5">
+      <button onclick="nuevoEquipo()" data-roles="pastor,lider" class="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold rounded-xl flex items-center gap-2">
+        <i data-lucide="plus" class="w-5 h-5"></i>Nuevo ministerio
+      </button>
+    </div>
+    <div id="grid" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  `;
+  const { data } = await supabase.from('members').select('id, nombre').order('nombre');
+  miembrosCache = data || [];
+  UI.refreshIcons();
+  await cargar();
+})();
+
+async function cargar() {
+  const { data: teams } = await supabase.from('teams').select('*, members!teams_lider_fk(nombre)').order('nombre');
+  const { data: rels } = await supabase.from('member_teams').select('team_id');
+  const conteo = {};
+  (rels||[]).forEach(r => conteo[r.team_id] = (conteo[r.team_id]||0)+1);
+
+  const grid = document.getElementById('grid');
+  if (!teams || teams.length === 0) {
+    grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400">
+      <i data-lucide="target" class="w-12 h-12 mx-auto mb-3 opacity-40"></i>
+      <p>Sin ministerios registrados.</p>
+    </div>`;
+    UI.refreshIcons(); return;
+  }
+  grid.innerHTML = teams.map(t => `
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md transition">
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0">
+            <i data-lucide="target" class="w-5 h-5"></i>
+          </div>
+          <h4 class="font-bold text-slate-800 truncate">${t.nombre}</h4>
+        </div>
+        <div class="flex gap-1">
+          <button onclick='editar(${JSON.stringify(t).replace(/'/g,"&#39;")})' data-roles="pastor,lider" class="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600">
+            <i data-lucide="pencil" class="w-4 h-4"></i>
+          </button>
+          <button onclick="eliminar('${t.id}','${t.nombre.replace(/'/g,"\\'")}')" data-roles="pastor" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+      ${t.descripcion ? `<p class="text-sm text-slate-500 mb-3 line-clamp-2">${t.descripcion}</p>` : ''}
+      <div class="text-sm space-y-1.5 border-t border-slate-100 pt-3">
+        <div class="flex items-center gap-2"><i data-lucide="user-check" class="w-3.5 h-3.5 text-slate-400"></i><span class="text-slate-600">Líder:</span> <span class="font-medium">${t.members ? t.members.nombre : '<span class="text-slate-400">sin asignar</span>'}</span></div>
+        <div class="flex items-center gap-2"><i data-lucide="users" class="w-3.5 h-3.5 text-slate-400"></i><span class="text-slate-600">Integrantes:</span> <span class="font-medium">${conteo[t.id]||0}</span></div>
+      </div>
+    </div>
+  `).join('');
+  UI.refreshIcons();
+  Auth.applyRoleVisibility();
+}
+
+function nuevoEquipo(t) {
+  t = t || {};
+  const opts = miembrosCache.map(m => `<option value="${m.id}" ${t.lider_id===m.id?'selected':''}>${m.nombre}</option>`).join('');
+  UI.openModal('modalTeam', `
+    <div class="sticky top-0 bg-white border-b border-slate-200 p-4 flex items-center justify-between z-10">
+      <h3 class="text-lg font-bold">${t.id?'Editar':'Nuevo'} ministerio</h3>
+      <button onclick="UI.closeModal('modalTeam')" class="p-2 hover:bg-slate-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+    <form id="tForm" class="p-4 space-y-3">
+      <input name="id" type="hidden" value="${t.id||''}">
+      <div>
+        <label class="text-sm font-medium text-slate-700">Nombre *</label>
+        <input name="nombre" required value="${t.nombre||''}" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Descripción</label>
+        <textarea name="descripcion" rows="2" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">${t.descripcion||''}</textarea>
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-700">Líder</label>
+        <select name="lider_id" class="w-full mt-1 px-3 py-2.5 border border-slate-300 rounded-lg">
+          <option value="">Sin líder</option>${opts}
+        </select>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="button" onclick="UI.closeModal('modalTeam')" class="flex-1 py-3 bg-slate-100 rounded-xl font-medium">Cancelar</button>
+        <button type="submit" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold flex items-center justify-center gap-2">
+          <i data-lucide="save" class="w-4 h-4"></i>Guardar
+        </button>
+      </div>
+    </form>
+  `);
+  document.getElementById('tForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const id = fd.get('id');
+    const payload = {
+      nombre: fd.get('nombre'),
+      descripcion: fd.get('descripcion') || null,
+      lider_id: fd.get('lider_id') || null
+    };
+    const { error } = id
+      ? await supabase.from('teams').update(payload).eq('id', id)
+      : await supabase.from('teams').insert(payload);
+    if (error) UI.toast(error.message, 'error');
+    else { UI.toast('Guardado','success'); UI.closeModal('modalTeam'); cargar(); }
+  };
+}
+
+function editar(t) { nuevoEquipo(t); }
+
+async function eliminar(id, nombre) {
+  if (!confirm(`¿Eliminar "${nombre}"?`)) return;
+  const { error } = await supabase.from('teams').delete().eq('id', id);
+  if (error) UI.toast(error.message, 'error');
+  else { UI.toast('Eliminado','success'); cargar(); }
+}
+
+window.nuevoEquipo = nuevoEquipo;
+window.editar = editar;
+window.eliminar = eliminar;
+</script>
+</body>
+</html>

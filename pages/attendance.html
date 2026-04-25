@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Asistencia · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1"></div>
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+let miembrosData = [];
+let attMap = {};
+let servicioActivo = null;
+let familiasCache = [];
+let casasCache = [];
+
+(async function() {
+  if (!(await Auth.requireAuth())) return;
+  document.getElementById('app').innerHTML = UI.renderLayout('Asistencia');
+  Auth.applyRoleVisibility();
+  UI.refreshIcons();
+
+  const hoy = new Date().toISOString().slice(0,10);
+  document.getElementById('pageContent').innerHTML = `
+    <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
+      <label class="text-sm font-medium text-slate-600 flex items-center gap-1.5 mb-1.5">
+        <i data-lucide="calendar" class="w-4 h-4"></i>Fecha
+      </label>
+      <input id="fecha" type="date" value="${hoy}" onchange="cargarServiciosDelDia()" class="w-full sm:w-64 px-3 py-2.5 border border-slate-300 rounded-lg">
+    </div>
+
+    <div id="servicios" class="mb-4"></div>
+
+    <div id="panelAsistencia" class="hidden">
+      <div id="reporte" class="mb-4"></div>
+
+      <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="text-xs font-medium text-slate-600 flex items-center gap-1 mb-1"><i data-lucide="search" class="w-3.5 h-3.5"></i>Nombre</label>
+          <input id="buscarNombre" placeholder="Buscar..." class="w-full px-3 py-2.5 border border-slate-300 rounded-lg">
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600 flex items-center gap-1 mb-1"><i data-lucide="home" class="w-3.5 h-3.5"></i>Familia</label>
+          <select id="filtroFamilia" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg">
+            <option value="">Todas</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-600 flex items-center gap-1 mb-1"><i data-lucide="croissant" class="w-3.5 h-3.5"></i>Casa de Pan</label>
+          <select id="filtroCasa" class="w-full px-3 py-2.5 border border-slate-300 rounded-lg">
+            <option value="">Todas</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex gap-2 mb-4 flex-wrap">
+        <button onclick="marcarTodos(true)" class="px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded-lg text-sm font-medium flex items-center gap-1.5">
+          <i data-lucide="check" class="w-4 h-4"></i>Marcar todos
+        </button>
+        <button onclick="marcarTodos(false)" class="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-sm font-medium flex items-center gap-1.5">
+          <i data-lucide="x" class="w-4 h-4"></i>Desmarcar todos
+        </button>
+      </div>
+
+      <div id="lista" class="space-y-2"></div>
+    </div>
+  `;
+
+  const [fams, cs] = await Promise.all([
+    supabase.from('families').select('*').order('nombre_familia'),
+    supabase.from('houses').select('*').order('nombre')
+  ]);
+  familiasCache = fams.data || [];
+  casasCache = cs.data || [];
+
+  const selFam = document.getElementById('filtroFamilia');
+  familiasCache.forEach(f => selFam.innerHTML += `<option value="${f.id}">${f.nombre_familia}</option>`);
+  const selCasa = document.getElementById('filtroCasa');
+  casasCache.forEach(c => selCasa.innerHTML += `<option value="${c.id}">${c.nombre}</option>`);
+
+  document.getElementById('buscarNombre').oninput = render;
+  document.getElementById('filtroFamilia').onchange = render;
+  document.getElementById('filtroCasa').onchange = render;
+
+  const { data: miembros } = await supabase.from('members')
+    .select(`id, nombre, foto_url, familia_id, families(nombre_familia), member_houses(house_id)`)
+    .neq('estado_espiritual','inactivo')
+    .order('nombre');
+  miembrosData = miembros || [];
+
+  UI.refreshIcons();
+  await cargarServiciosDelDia();
+})();
+
+async function cargarServiciosDelDia() {
+  const fecha = document.getElementById('fecha').value;
+  const cont = document.getElementById('servicios');
+  if (!fecha) { cont.innerHTML=''; return; }
+
+  const { data: servicios } = await supabase.from('service_plans')
+    .select('*, meeting_types(nombre, icono)')
+    .eq('fecha', fecha)
+    .order('created_at');
+
+  if (!servicios || servicios.length === 0) {
+    cont.innerHTML = `
+      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 text-center">
+        <i data-lucide="calendar-off" class="w-10 h-10 mx-auto text-amber-500 mb-2"></i>
+        <p class="text-amber-900 mb-3">No hay servicios planificados para esta fecha.</p>
+        <a href="services.html" class="inline-flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-semibold">
+          <i data-lucide="plus" class="w-4 h-4"></i>Crear servicio
+        </a>
+      </div>
+    `;
+    document.getElementById('panelAsistencia').classList.add('hidden');
+    servicioActivo = null;
+    UI.refreshIcons();
+    return;
+  }
+
+  cont.innerHTML = `
+    <div class="bg-white rounded-2xl border border-slate-200 p-4">
+      <div class="text-sm font-medium text-slate-600 mb-3">
+        ${servicios.length === 1 ? 'Servicio del día:' : `${servicios.length} servicios — selecciona cuál registrar:`}
+      </div>
+      <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        ${servicios.map(s => {
+          const activo = servicioActivo && servicioActivo.id === s.id;
+          return `
+            <button onclick="seleccionarServicio('${s.id}')"
+              class="text-left p-3 rounded-xl border-2 transition active:scale-[0.98] ${activo?'border-indigo-600 bg-indigo-50':'border-slate-200 bg-white hover:border-indigo-300'}">
+              <div class="flex items-center gap-2">
+                <div class="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center text-xl flex-shrink-0">${s.meeting_types?.icono || '⛪'}</div>
+                <div class="flex-1 min-w-0">
+                  <div class="font-bold truncate">${s.meeting_types?.nombre || s.tipo_reunion}</div>
+                  ${s.tema ? `<div class="text-xs text-slate-500 truncate">${s.tema}</div>` : ''}
+                </div>
+                ${activo ? '<i data-lucide="check-circle-2" class="w-5 h-5 text-indigo-600"></i>' : ''}
+              </div>
+            </button>
+          `;
+        }).join('')}
+      </div>
+      <p class="text-xs text-slate-500 mt-3 flex items-start gap-1"><i data-lucide="info" class="w-3.5 h-3.5 mt-0.5 flex-shrink-0"></i>Un miembro puede asistir a varios servicios el mismo día — registra cada uno por separado.</p>
+    </div>
+  `;
+  UI.refreshIcons();
+
+  if (servicios.length === 1 && !servicioActivo) {
+    seleccionarServicio(servicios[0].id, servicios);
+  } else if (servicioActivo) {
+    const actualizado = servicios.find(s => s.id === servicioActivo.id);
+    if (actualizado) seleccionarServicio(actualizado.id, servicios);
+    else { servicioActivo = null; document.getElementById('panelAsistencia').classList.add('hidden'); }
+  }
+}
+
+async function seleccionarServicio(id, listaServicios) {
+  if (!listaServicios) {
+    const { data } = await supabase.from('service_plans').select('*, meeting_types(nombre,icono)').eq('id', id).single();
+    servicioActivo = data;
+  } else {
+    servicioActivo = listaServicios.find(s => s.id === id);
+  }
+  await cargarServiciosDelDia();
+
+  const { data: att } = await supabase.from('attendance')
+    .select('*').eq('fecha', servicioActivo.fecha).eq('meeting_type_id', servicioActivo.meeting_type_id);
+  attMap = {};
+  (att||[]).forEach(a => attMap[a.member_id] = a);
+
+  document.getElementById('panelAsistencia').classList.remove('hidden');
+  render();
+}
+
+function render() {
+  if (!servicioActivo) return;
+  const q = document.getElementById('buscarNombre').value.trim().toLowerCase();
+  const fam = document.getElementById('filtroFamilia').value;
+  const casa = document.getElementById('filtroCasa').value;
+
+  let filtered = miembrosData;
+  if (q) filtered = filtered.filter(m => (m.nombre||'').toLowerCase().includes(q));
+  if (fam) filtered = filtered.filter(m => m.familia_id === fam);
+  if (casa) filtered = filtered.filter(m => (m.member_houses||[]).some(mh => mh.house_id === casa));
+
+  const total = miembrosData.length;
+  const presentes = Object.values(attMap).filter(a => a.asistio).length;
+  const tipoNombre = servicioActivo.meeting_types?.nombre || servicioActivo.tipo_reunion;
+  const tipoIcono  = servicioActivo.meeting_types?.icono || '⛪';
+
+  document.getElementById('reporte').innerHTML = `
+    <div class="bg-gradient-to-r from-indigo-600 to-violet-700 text-white rounded-2xl p-4 mb-3">
+      <div class="text-xs opacity-80 uppercase tracking-wide">Registrando asistencia</div>
+      <div class="text-lg sm:text-xl font-bold">${tipoIcono} ${tipoNombre}</div>
+      ${servicioActivo.tema ? `<div class="text-sm opacity-90 mt-1">${servicioActivo.tema}</div>`:''}
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div><div class="text-xs text-slate-500">Total</div><div class="text-xl sm:text-2xl font-bold">${total}</div></div>
+      <div><div class="text-xs text-slate-500">Presentes</div><div class="text-xl sm:text-2xl font-bold text-emerald-600">${presentes}</div></div>
+      <div><div class="text-xs text-slate-500">Ausentes</div><div class="text-xl sm:text-2xl font-bold text-red-600">${total-presentes}</div></div>
+      <div><div class="text-xs text-slate-500">% Asist.</div><div class="text-xl sm:text-2xl font-bold text-indigo-600">${total?Math.round(presentes/total*100):0}%</div></div>
+    </div>
+  `;
+
+  const lista = document.getElementById('lista');
+  if (filtered.length === 0) {
+    lista.innerHTML = '<p class="text-slate-400 text-center py-6">Sin miembros que coincidan.</p>';
+    return;
+  }
+
+  lista.innerHTML = `<div class="text-xs text-slate-500 mb-2">Mostrando ${filtered.length} de ${total}</div>` +
+    filtered.map(m => {
+    const a = attMap[m.id];
+    const asistio = a ? a.asistio : false;
+    return `
+      <label class="bg-white rounded-xl border border-slate-200 p-3 flex items-center gap-3 cursor-pointer hover:bg-slate-50 active:scale-[0.99] transition has-[:checked]:bg-emerald-50 has-[:checked]:border-emerald-300">
+        <div class="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold overflow-hidden flex-shrink-0">
+          ${m.foto_url ? `<img src="${m.foto_url}" class="w-full h-full object-cover">` : m.nombre[0].toUpperCase()}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="font-medium text-slate-800 truncate">${m.nombre}</div>
+          ${m.families ? `<div class="text-xs text-slate-500 truncate flex items-center gap-1"><i data-lucide="home" class="w-3 h-3"></i>${m.families.nombre_familia}</div>` : ''}
+        </div>
+        <input type="checkbox" ${asistio?'checked':''} onchange="marcar('${m.id}', this.checked)" class="w-6 h-6 accent-emerald-600 flex-shrink-0">
+      </label>`;
+  }).join('');
+  UI.refreshIcons();
+}
+
+async function marcar(memberId, asistio) {
+  if (!servicioActivo) return;
+  const payload = {
+    member_id: memberId, fecha: servicioActivo.fecha,
+    meeting_type_id: servicioActivo.meeting_type_id, tipo_reunion: servicioActivo.tipo_reunion, asistio
+  };
+  const { error } = await supabase.from('attendance').upsert(payload, { onConflict: 'member_id,fecha,tipo_reunion' });
+  if (error) { UI.toast(error.message, 'error'); return; }
+  attMap[memberId] = { ...(attMap[memberId]||{}), ...payload };
+  render();
+}
+
+async function marcarTodos(asistio) {
+  if (!servicioActivo) return;
+  const q = document.getElementById('buscarNombre').value.trim().toLowerCase();
+  const fam = document.getElementById('filtroFamilia').value;
+  const casa = document.getElementById('filtroCasa').value;
+
+  let visibles = miembrosData;
+  if (q) visibles = visibles.filter(m => (m.nombre||'').toLowerCase().includes(q));
+  if (fam) visibles = visibles.filter(m => m.familia_id === fam);
+  if (casa) visibles = visibles.filter(m => (m.member_houses||[]).some(mh => mh.house_id === casa));
+
+  if (visibles.length === 0) return;
+  if (!confirm(`¿${asistio?'Marcar':'Desmarcar'} ${visibles.length} miembros?`)) return;
+
+  const rows = visibles.map(m => ({
+    member_id: m.id, fecha: servicioActivo.fecha,
+    meeting_type_id: servicioActivo.meeting_type_id, tipo_reunion: servicioActivo.tipo_reunion, asistio
+  }));
+  const { error } = await supabase.from('attendance').upsert(rows, { onConflict: 'member_id,fecha,tipo_reunion' });
+  if (error) UI.toast(error.message, 'error');
+  else { UI.toast(`${rows.length} actualizados`, 'success'); seleccionarServicio(servicioActivo.id); }
+}
+
+window.cargarServiciosDelDia = cargarServiciosDelDia;
+window.seleccionarServicio = seleccionarServicio;
+window.marcar = marcar;
+window.marcarTodos = marcarTodos;
+</script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#4f46e5">
+<title>Dashboard · ADULAM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="../assets/styles.css">
+</head>
+<body class="bg-slate-50 min-h-screen flex">
+<div id="app" class="flex flex-1">
+  <!-- Loader visible mientras carga -->
+  <div id="loader" class="w-full flex items-center justify-center">
+    <div class="text-center p-8">
+      <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-700 flex items-center justify-center text-white text-xl font-bold mx-auto mb-4 animate-pulse">A</div>
+      <p class="text-slate-500 text-sm" id="loaderMsg">Cargando ADULAM...</p>
+    </div>
+  </div>
+</div>
+
+<script src="../js/config.js"></script>
+<script src="../js/auth.js"></script>
+<script src="../js/ui.js"></script>
+<script>
+(async function() {
+  var loaderMsg = document.getElementById('loaderMsg');
+
+  try {
+    // Paso 1: verificar auth
+    loaderMsg.textContent = 'Verificando sesión...';
+    var ok = await Auth.requireAuth();
+    if (!ok) return; // ya redirigió a login
+
+    // Paso 2: verificar que tenemos perfil
+    loaderMsg.textContent = 'Cargando perfil...';
+    if (!Auth.currentProfile) {
+      document.getElementById('app').innerHTML =
+        '<div class="w-full flex items-center justify-center p-8"><div class="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-md text-center">' +
+        '<h3 class="text-lg font-bold text-red-800 mb-2">Error de perfil</h3>' +
+        '<p class="text-red-700 text-sm">No se encontró tu perfil en la tabla <code>profiles</code>. Ejecuta el parche SQL en Supabase.</p>' +
+        '</div></div>';
+      return;
+    }
+
+    // Paso 3: renderizar layout
+    loaderMsg.textContent = 'Construyendo interfaz...';
+    document.getElementById('app').innerHTML = UI.renderLayout('Dashboard');
+    Auth.applyRoleVisibility();
+
+    // Paso 4: refrescar iconos de manera segura
+    if (typeof lucide !== 'undefined' && lucide.createIcons) {
+      lucide.createIcons();
+    }
+
+    // Paso 5: contenido del dashboard
+    var nombre = Auth.currentProfile.nombre || 'Usuario';
+    var content = document.getElementById('pageContent');
+    content.innerHTML =
+      '<div class="mb-5">' +
+        '<h3 class="text-xl sm:text-2xl font-bold text-slate-800">Bienvenido, ' + nombre.split(' ')[0] + '</h3>' +
+        '<p class="text-sm text-slate-500 mt-0.5">Panorama general de ADULAM</p>' +
+      '</div>' +
+      '<div id="stats" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 mb-6">' +
+        '<div class="col-span-full text-center text-slate-400 py-6">Cargando estadísticas...</div>' +
+      '</div>' +
+      '<div class="grid lg:grid-cols-2 gap-4 sm:gap-6">' +
+        '<div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">' +
+          '<h4 class="font-bold text-slate-800 mb-4">Acciones rápidas</h4>' +
+          '<div class="grid grid-cols-2 gap-3">' +
+            '<a href="members.html" class="p-4 bg-indigo-50 hover:bg-indigo-100 active:scale-[0.97] rounded-xl transition">' +
+              '<div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center mb-2"><i data-lucide="user-plus" class="w-5 h-5"></i></div>' +
+              '<div class="text-sm font-semibold text-indigo-700">Nuevo miembro</div>' +
+            '</a>' +
+            '<a href="attendance.html" class="p-4 bg-emerald-50 hover:bg-emerald-100 active:scale-[0.97] rounded-xl transition">' +
+              '<div class="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center mb-2"><i data-lucide="check-square" class="w-5 h-5"></i></div>' +
+              '<div class="text-sm font-semibold text-emerald-700">Tomar asistencia</div>' +
+            '</a>' +
+            '<a href="houses.html" class="p-4 bg-amber-50 hover:bg-amber-100 active:scale-[0.97] rounded-xl transition">' +
+              '<div class="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center mb-2"><i data-lucide="croissant" class="w-5 h-5"></i></div>' +
+              '<div class="text-sm font-semibold text-amber-700">Casas de Pan</div>' +
+            '</a>' +
+            '<a href="discipleship.html" class="p-4 bg-violet-50 hover:bg-violet-100 active:scale-[0.97] rounded-xl transition">' +
+              '<div class="w-10 h-10 rounded-xl bg-violet-600 text-white flex items-center justify-center mb-2"><i data-lucide="book-open" class="w-5 h-5"></i></div>' +
+              '<div class="text-sm font-semibold text-violet-700">Discipulado</div>' +
+            '</a>' +
+          '</div>' +
+        '</div>' +
+        '<div class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6">' +
+          '<h4 class="font-bold text-slate-800 mb-4">Últimas alertas</h4>' +
+          '<div id="alertas" class="space-y-2 text-sm"><p class="text-slate-400 py-4 text-center">Cargando...</p></div>' +
+        '</div>' +
+      '</div>';
+
+    // Refrescar iconos
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+
+    // Paso 6: cargar estadísticas
+    try {
+      var result = await supabase.from('v_dashboard').select('*').single();
+      var stats = result.data;
+      var statsGrid = document.getElementById('stats');
+      if (result.error) {
+        statsGrid.innerHTML = '<div class="col-span-full text-amber-700 text-sm bg-amber-50 rounded-xl p-4">No se cargaron estadísticas: ' + result.error.message + '</div>';
+      } else {
+        statsGrid.innerHTML =
+          UI.statCard('users',      'Miembros activos',   stats.total_miembros || 0,   'indigo') +
+          UI.statCard('sparkles',   'Nuevos (30d)',       stats.nuevos_miembros || 0,  'emerald') +
+          UI.statCard('book-open',  'En discipulado',     stats.en_discipulado || 0,   'violet') +
+          UI.statCard('user-minus', 'Inactivos',          stats.inactivos || 0,        'slate') +
+          UI.statCard('hand-heart', 'Asistencia semanal', stats.asistencia_semanal || 0,'amber') +
+          UI.statCard('wallet',     'Balance mes',        UI.dinero(stats.balance_mes || 0), 'rose');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    } catch (e) {
+      document.getElementById('stats').innerHTML =
+        '<div class="col-span-full text-red-600 text-sm bg-red-50 rounded-xl p-4">Error: ' + e.message + '</div>';
+    }
+
+    // Paso 7: cargar alertas
+    try {
+      var alertResult = await supabase.from('automation_logs')
+        .select('*').order('created_at', { ascending: false }).limit(5);
+      var alertas = alertResult.data;
+      var cont = document.getElementById('alertas');
+      if (!alertas || alertas.length === 0) {
+        cont.innerHTML = '<p class="text-slate-400 text-center py-4">Sin alertas por ahora.</p>';
+      } else {
+        cont.innerHTML = alertas.map(function(a) {
+          var iconName = a.tipo === 'inactividad' ? 'user-minus' : a.tipo === 'sin_discipulador' ? 'alert-triangle' : 'sparkles';
+          return '<div class="flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50">' +
+            '<div class="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">' +
+              '<i data-lucide="' + iconName + '" class="w-4 h-4"></i>' +
+            '</div>' +
+            '<div class="flex-1 min-w-0">' +
+              '<div class="text-sm text-slate-700">' + a.mensaje + '</div>' +
+              '<div class="text-xs text-slate-400 mt-0.5">' + UI.fecha(a.created_at) + '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+      }
+    } catch (e) {
+      document.getElementById('alertas').innerHTML = '<p class="text-slate-400 text-center py-4">Sin datos.</p>';
+    }
+
+  } catch (err) {
+    // Capturar CUALQUIER error y mostrarlo visiblemente
+    document.getElementById('app').innerHTML =
+      '<div class="w-full flex items-center justify-center p-8">' +
+        '<div class="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-lg w-full">' +
+          '<h3 class="text-lg font-bold text-red-800 mb-2">Error al cargar el dashboard</h3>' +
+          '<p class="text-red-700 text-sm font-mono bg-red-100 rounded-lg p-3 break-words">' + (err.message || err) + '</p>' +
+          '<p class="text-red-600 text-xs mt-2">Stack: ' + (err.stack || 'N/A').substring(0, 300) + '</p>' +
+          '<div class="flex gap-2 mt-4">' +
+            '<button onclick="location.reload()" class="flex-1 py-2 bg-red-600 text-white rounded-lg font-medium">Recargar</button>' +
+            '<a href="' + Auth._loginUrl() + '" class="flex-1 py-2 bg-slate-200 rounded-lg font-medium text-center">Ir al login</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    console.error('ADULAM Dashboard Error:', err);
+  }
+})();
+</script>
+</body>
+</html>
