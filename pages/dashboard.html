@@ -17,6 +17,8 @@
     <div class="text-center p-8">
       <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-700 flex items-center justify-center text-white text-xl font-bold mx-auto mb-4 animate-pulse">A</div>
       <p class="text-slate-500 text-sm" id="loaderMsg">Cargando ADULAM...</p>
+      <p class="text-slate-300 text-xs mt-2" id="loaderHint"></p>
+      <button id="loaderEscape" class="hidden mt-4 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-medium" onclick="window.location.href='../login.html'">Volver al login</button>
     </div>
   </div>
 </div>
@@ -27,6 +29,38 @@
 <script>
 (async function() {
   var loaderMsg = document.getElementById('loaderMsg');
+  var loaderHint = document.getElementById('loaderHint');
+  var loaderEscape = document.getElementById('loaderEscape');
+
+  // Si pasan más de 12 segundos sin que termine, mostramos botón de escape
+  var escapeTimer = setTimeout(function() {
+    loaderHint.textContent = 'Esto está tardando más de lo normal...';
+    loaderEscape.classList.remove('hidden');
+  }, 12000);
+
+  // Helper: wrap promesa con timeout
+  function withTimeout(p, ms, label) {
+    return new Promise(function(resolve, reject) {
+      var t = setTimeout(function() { reject(new Error('Timeout en ' + label)); }, ms);
+      p.then(function(v) { clearTimeout(t); resolve(v); }).catch(function(e) { clearTimeout(t); reject(e); });
+    });
+  }
+
+  function showError(titulo, mensaje, stack) {
+    clearTimeout(escapeTimer);
+    document.getElementById('app').innerHTML =
+      '<div class="w-full flex items-center justify-center p-4">' +
+        '<div class="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-lg w-full">' +
+          '<h3 class="text-lg font-bold text-red-800 mb-2">' + titulo + '</h3>' +
+          '<p class="text-red-700 text-sm font-mono bg-red-100 rounded-lg p-3 break-words">' + mensaje + '</p>' +
+          (stack ? '<details class="mt-2"><summary class="text-xs text-red-600 cursor-pointer">Detalles técnicos</summary><pre class="text-xs mt-1 text-red-600 overflow-auto bg-red-100 rounded-lg p-2">' + stack + '</pre></details>' : '') +
+          '<div class="flex gap-2 mt-4">' +
+            '<button onclick="location.reload()" class="flex-1 py-2 bg-red-600 text-white rounded-lg font-medium">Recargar</button>' +
+            '<a href="../login.html" class="flex-1 py-2 bg-slate-200 rounded-lg font-medium text-center">Ir al login</a>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
 
   try {
     // Paso 1: verificar auth
@@ -34,15 +68,11 @@
     var ok = await Auth.requireAuth();
     if (!ok) return; // ya redirigió a login
 
-    // Paso 2: verificar que tenemos perfil
+    // Paso 2: verificar perfil (Auth ya aplica fallback si hace falta)
     loaderMsg.textContent = 'Cargando perfil...';
     if (!Auth.currentProfile) {
-      document.getElementById('app').innerHTML =
-        '<div class="w-full flex items-center justify-center p-8"><div class="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-md text-center">' +
-        '<h3 class="text-lg font-bold text-red-800 mb-2">Error de perfil</h3>' +
-        '<p class="text-red-700 text-sm">No se encontró tu perfil en la tabla <code>profiles</code>. Ejecuta el parche SQL en Supabase.</p>' +
-        '</div></div>';
-      return;
+      // Esto NO debería pasar con la nueva lógica, pero por si acaso
+      Auth._setFallbackProfile();
     }
 
     // Paso 3: renderizar layout
@@ -54,6 +84,9 @@
     if (typeof lucide !== 'undefined' && lucide.createIcons) {
       lucide.createIcons();
     }
+
+    // Cancelamos el timer de escape porque ya renderizamos el layout
+    clearTimeout(escapeTimer);
 
     // Paso 5: contenido del dashboard
     var nombre = Auth.currentProfile.nombre || 'Usuario';
@@ -94,17 +127,28 @@
         '</div>' +
       '</div>';
 
-    // Refrescar iconos
     if (typeof lucide !== 'undefined') lucide.createIcons();
 
-    // Paso 6: cargar estadísticas
+    // Paso 6: cargar estadísticas (con timeout para no colgar)
     try {
-      var result = await supabase.from('v_dashboard').select('*').single();
-      var stats = result.data;
+      var result = await withTimeout(
+        supabase.from('v_dashboard').select('*').maybeSingle(),
+        6000, 'v_dashboard'
+      );
       var statsGrid = document.getElementById('stats');
       if (result.error) {
         statsGrid.innerHTML = '<div class="col-span-full text-amber-700 text-sm bg-amber-50 rounded-xl p-4">No se cargaron estadísticas: ' + result.error.message + '</div>';
+      } else if (!result.data) {
+        // Vista existe pero sin datos: mostramos ceros
+        statsGrid.innerHTML =
+          UI.statCard('users',      'Miembros activos',   0, 'indigo') +
+          UI.statCard('sparkles',   'Nuevos (30d)',       0, 'emerald') +
+          UI.statCard('book-open',  'En discipulado',     0, 'violet') +
+          UI.statCard('user-minus', 'Inactivos',          0, 'slate') +
+          UI.statCard('hand-heart', 'Asistencia semanal', 0, 'amber') +
+          UI.statCard('wallet',     'Balance mes',        UI.dinero(0), 'rose');
       } else {
+        var stats = result.data;
         statsGrid.innerHTML =
           UI.statCard('users',      'Miembros activos',   stats.total_miembros || 0,   'indigo') +
           UI.statCard('sparkles',   'Nuevos (30d)',       stats.nuevos_miembros || 0,  'emerald') +
@@ -112,20 +156,24 @@
           UI.statCard('user-minus', 'Inactivos',          stats.inactivos || 0,        'slate') +
           UI.statCard('hand-heart', 'Asistencia semanal', stats.asistencia_semanal || 0,'amber') +
           UI.statCard('wallet',     'Balance mes',        UI.dinero(stats.balance_mes || 0), 'rose');
-        if (typeof lucide !== 'undefined') lucide.createIcons();
       }
+      if (typeof lucide !== 'undefined') lucide.createIcons();
     } catch (e) {
       document.getElementById('stats').innerHTML =
-        '<div class="col-span-full text-red-600 text-sm bg-red-50 rounded-xl p-4">Error: ' + e.message + '</div>';
+        '<div class="col-span-full text-amber-700 text-sm bg-amber-50 rounded-xl p-4">Estadísticas no disponibles: ' + e.message + '</div>';
     }
 
-    // Paso 7: cargar alertas
+    // Paso 7: cargar alertas (con timeout)
     try {
-      var alertResult = await supabase.from('automation_logs')
-        .select('*').order('created_at', { ascending: false }).limit(5);
+      var alertResult = await withTimeout(
+        supabase.from('automation_logs').select('*').order('created_at', { ascending: false }).limit(5),
+        6000, 'automation_logs'
+      );
       var alertas = alertResult.data;
       var cont = document.getElementById('alertas');
-      if (!alertas || alertas.length === 0) {
+      if (alertResult.error) {
+        cont.innerHTML = '<p class="text-amber-600 text-center py-4 text-xs">' + alertResult.error.message + '</p>';
+      } else if (!alertas || alertas.length === 0) {
         cont.innerHTML = '<p class="text-slate-400 text-center py-4">Sin alertas por ahora.</p>';
       } else {
         cont.innerHTML = alertas.map(function(a) {
@@ -143,24 +191,12 @@
         if (typeof lucide !== 'undefined') lucide.createIcons();
       }
     } catch (e) {
-      document.getElementById('alertas').innerHTML = '<p class="text-slate-400 text-center py-4">Sin datos.</p>';
+      document.getElementById('alertas').innerHTML = '<p class="text-slate-400 text-center py-4 text-xs">' + e.message + '</p>';
     }
 
   } catch (err) {
-    // Capturar CUALQUIER error y mostrarlo visiblemente
-    document.getElementById('app').innerHTML =
-      '<div class="w-full flex items-center justify-center p-8">' +
-        '<div class="bg-red-50 border border-red-200 rounded-2xl p-6 max-w-lg w-full">' +
-          '<h3 class="text-lg font-bold text-red-800 mb-2">Error al cargar el dashboard</h3>' +
-          '<p class="text-red-700 text-sm font-mono bg-red-100 rounded-lg p-3 break-words">' + (err.message || err) + '</p>' +
-          '<p class="text-red-600 text-xs mt-2">Stack: ' + (err.stack || 'N/A').substring(0, 300) + '</p>' +
-          '<div class="flex gap-2 mt-4">' +
-            '<button onclick="location.reload()" class="flex-1 py-2 bg-red-600 text-white rounded-lg font-medium">Recargar</button>' +
-            '<a href="' + Auth._loginUrl() + '" class="flex-1 py-2 bg-slate-200 rounded-lg font-medium text-center">Ir al login</a>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
     console.error('ADULAM Dashboard Error:', err);
+    showError('Error al cargar el dashboard', err.message || String(err), err.stack);
   }
 })();
 </script>
