@@ -48,7 +48,7 @@
           <input type="password" id="loginPassword" required autocomplete="current-password" class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none">
         </div>
       </div>
-      <button type="submit" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2">
+      <button type="submit" id="btnLogin" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2 disabled:opacity-60">
         <i data-lucide="log-in" class="w-5 h-5"></i>
         Entrar
       </button>
@@ -76,7 +76,7 @@
           <input type="password" id="regPassword" minlength="6" required class="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none">
         </div>
       </div>
-      <button type="submit" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2">
+      <button type="submit" id="btnRegister" class="w-full py-3 bg-gradient-to-r from-indigo-600 to-violet-700 text-white font-semibold rounded-xl hover:shadow-lg active:scale-[0.98] transition flex items-center justify-center gap-2 disabled:opacity-60">
         <i data-lucide="user-plus" class="w-5 h-5"></i>
         Crear cuenta
       </button>
@@ -86,16 +86,26 @@
     <div id="mensaje" class="mt-4 text-sm text-center"></div>
   </div>
 
-  <p class="text-center text-xs text-slate-400 mt-6">ADULAM MVP · v1.3</p>
+  <p class="text-center text-xs text-slate-400 mt-6">ADULAM MVP · v1.5</p>
 </div>
 
 <script src="js/config.js"></script>
 <script src="js/auth.js"></script>
 <script>
   lucide.createIcons();
+
+  // Verificar si ya hay sesión activa al cargar (con timeout)
   (async function(){
-    const session = await Auth.getSession();
-    if (session) window.location.href = Auth._dashboardUrl();
+    try {
+      var session = await Auth.getSession();
+      if (session) {
+        console.log('[login] sesión activa detectada, redirigiendo al dashboard');
+        window.location.href = Auth._dashboardUrl();
+      }
+    } catch(e) {
+      console.warn('[login] getSession falló al cargar la página:', e.message);
+      // Continuamos en login normal, no hacemos nada
+    }
   })();
 
   const tabLogin = document.getElementById('tabLogin');
@@ -103,6 +113,8 @@
   const formLogin = document.getElementById('formLogin');
   const formRegister = document.getElementById('formRegister');
   const mensaje = document.getElementById('mensaje');
+  const btnLogin = document.getElementById('btnLogin');
+  const btnRegister = document.getElementById('btnRegister');
 
   tabLogin.onclick = () => {
     tabLogin.className = 'flex-1 py-2.5 font-semibold text-sm rounded-lg bg-white text-indigo-700 shadow-sm transition';
@@ -119,23 +131,46 @@
 
   formLogin.addEventListener('submit', async (e) => {
     e.preventDefault();
+    btnLogin.disabled = true;
     mensaje.innerHTML = '<span class="text-slate-500">Entrando...</span>';
     try {
       await Auth.login(document.getElementById('loginEmail').value, document.getElementById('loginPassword').value);
-      window.location.href = Auth._dashboardUrl();
+      mensaje.innerHTML = '<span class="text-emerald-600">¡Listo! Redirigiendo...</span>';
+      // Pequeña pausa para que el usuario vea el mensaje
+      setTimeout(function() { window.location.href = Auth._dashboardUrl(); }, 200);
     } catch (err) {
-      mensaje.innerHTML = '<span class="text-red-600">' + (err.message || 'Error') + '</span>';
+      btnLogin.disabled = false;
+      console.error('[login] error:', err);
+      var msg = err.message || 'Error desconocido';
+      // Mensajes amigables para errores comunes
+      if (msg.toLowerCase().indexOf('invalid login') !== -1) msg = 'Correo o contraseña incorrectos.';
+      else if (msg.toLowerCase().indexOf('email not confirmed') !== -1) msg = 'Confirma tu correo electrónico antes de iniciar sesión.';
+      else if (msg.toLowerCase().indexOf('timeout') !== -1) msg = 'El servidor no responde. Verifica tu conexión a internet o las credenciales en js/config.js.';
+      else if (msg.toLowerCase().indexOf('failed to fetch') !== -1) msg = 'No hay conexión con Supabase. Verifica tu internet o la URL en js/config.js.';
+      mensaje.innerHTML = '<span class="text-red-600">' + msg + '</span>';
     }
   });
 
   formRegister.addEventListener('submit', async (e) => {
     e.preventDefault();
+    btnRegister.disabled = true;
     mensaje.innerHTML = '<span class="text-slate-500">Creando cuenta...</span>';
     try {
       await Auth.register(document.getElementById('regEmail').value, document.getElementById('regPassword').value, document.getElementById('regNombre').value);
+      btnRegister.disabled = false;
       mensaje.innerHTML = '<span class="text-emerald-600">Cuenta creada. Ya puedes iniciar sesión.</span>';
+      // Cambiamos automáticamente a la pestaña de login
+      setTimeout(function() {
+        tabLogin.click();
+        document.getElementById('loginEmail').value = document.getElementById('regEmail').value;
+      }, 1000);
     } catch (err) {
-      mensaje.innerHTML = '<span class="text-red-600">' + (err.message || 'Error') + '</span>';
+      btnRegister.disabled = false;
+      console.error('[register] error:', err);
+      var msg = err.message || 'Error desconocido';
+      if (msg.toLowerCase().indexOf('user already') !== -1) msg = 'Ya existe una cuenta con ese correo.';
+      else if (msg.toLowerCase().indexOf('timeout') !== -1) msg = 'El servidor no responde. Verifica tu conexión.';
+      mensaje.innerHTML = '<span class="text-red-600">' + msg + '</span>';
     }
   });
 </script>
