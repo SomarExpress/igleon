@@ -2,18 +2,42 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ADULAM</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js"></script>
   <script src="js/auth.js"></script>
+</head>
+<body style="font-family:system-ui;background:#f8fafc;margin:0">
+  <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px">
+    <div style="text-align:center">
+      <div style="width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-size:28px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 10px 25px rgba(79,70,229,0.25)">A</div>
+      <p style="color:#64748b;font-size:14px;margin:0" id="msg">Cargando ADULAM...</p>
+      <p style="color:#cbd5e1;font-size:12px;margin-top:8px" id="hint"></p>
+    </div>
+  </div>
   <script>
     (async function() {
-      const session = await Auth.getSession();
-      window.location.href = session ? Auth._dashboardUrl() : Auth._loginUrl();
+      var msg = document.getElementById('msg');
+      var hint = document.getElementById('hint');
+
+      // Si pasan 8 segundos sin redirigir, vamos al login forzosamente
+      var fallbackTimer = setTimeout(function() {
+        hint.textContent = 'Redirigiendo al login...';
+        window.location.href = Auth._loginUrl();
+      }, 8000);
+
+      try {
+        msg.textContent = 'Verificando sesión...';
+        var session = await Auth.getSession();
+        clearTimeout(fallbackTimer);
+        window.location.href = session ? Auth._dashboardUrl() : Auth._loginUrl();
+      } catch (e) {
+        clearTimeout(fallbackTimer);
+        console.error('[ADULAM index]', e);
+        window.location.href = Auth._loginUrl();
+      }
     })();
   </script>
-</head>
-<body>
-  <p style="font-family:sans-serif;text-align:center;margin-top:40px;color:#64748b">Cargando ADULAM...</p>
 </body>
 </html>
